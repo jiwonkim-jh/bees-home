@@ -2,7 +2,7 @@
    OBJ 지오메트리를 직접 투영해 인라인 SVG 폴리곤으로 그린다.
    · 회전  : 드래그 (yaw / pitch)      · 확대 : 휠
    · 절단  : 카메라와 중심 사이의 벽·천장을 숨겨 내부가 보이게 한다
-   · 선택  : 폴리곤 onclick → 2D 평면도와 동일한 selectRoom / openDevice
+   · 선택  : 폴리곤 onclick → 2D 평면도와 동일한 selectRoom / selectSensor
    규칙 §10 에 따라 three.js 등 외부 라이브러리를 쓰지 않는다.          */
 import {state} from '../data/state.js';
 import {GEO,GEO_ZONES} from '../data/geometry3d.js';
@@ -97,8 +97,9 @@ export function render3D(){
     if(f.l==='device'){ base=f.dev&&state.selSensor===f.dev?'#0877ed':COL.device; }
     if(f.l==='jet'){ base='#38a3f5'; op=0.20; cls='s3jet'; }
     const col=shade(base,lam);
+    /* 기기 클릭도 2D 평면도와 같은 경로 — 우측 패널 3단으로 진입한다 */
     const click=f.l==='device'&&f.dev&&f.sp
-      ? `openDevice('${f.sp}','${f.dev}')`
+      ? `selectRoom('${f.sp}');selectSensor('${f.dev}')`
       : (f.sp?`selectRoom('${f.sp}')`:'');
     /* tier : 0 바닥 → 1 공간 존 → 2 벽·기기 → 3 라벨.
        면 크기 차이가 커서 깊이 정렬만으로는 존이 바닥에 덮인다.

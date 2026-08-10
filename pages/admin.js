@@ -6,6 +6,7 @@ import {ALARMS,AUDIT,CCTVS,COSTS,ENG_TREND,IFACES,KPIS,PARTNERS,RECS,REQUESTS,RI
 import {state} from '../data/state.js';
 import {donut,svgArea,svgBars,svgMulti} from '../render/chart.js';
 import {closeAll,dlgOpen,pgHead,renderNotiBadge,renderPage,renderSideNav,toast} from '../render/shell.js';
+import {openDetail,popDetail,clearDetail,setDetailTab} from '../render/detail.js';
 
 /* ══════════════════════════════════════════════════════════════════
    관리자 · SCR-01 통합 운영 대시보드 (FR-MON-01)
@@ -174,28 +175,39 @@ export function openUnit(id){
   const rq=REQUESTS.filter(r=>r.sp===u.id);
   const sameType=UNITS.filter(x=>x.type===u.type&&x.occ);
   const typeAvg=sameType.reduce((a,x)=>a+x.kwh,0)/(sameType.length||1);
-  dlgOpen(`${u.id} · ${u.typeNm}`,'개체 상세 패널 · FR-DTM-04',`
-    <div class="kpiRow" style="grid-template-columns:1fr 1fr 1fr">
-      <div class="kpi"><div class="kl2">이달 전력</div><div class="kv2 num">${fx(u.kwh)}<small>kWh</small></div>
-        <div class="ks">동일 타입 평균 ${fx(typeAvg)}</div></div>
-      <div class="kpi ${u.al?'danger':'ok'}"><div class="kl2">활성 알람</div><div class="kv2 num">${u.al}<small>건</small></div></div>
-      <div class="kpi ${u.req?'warn':'ok'}"><div class="kl2">미처리 민원</div><div class="kv2 num">${u.req}<small>건</small></div></div>
-    </div>
-    <div class="sec" style="margin-top:14px">기본 정보</div>
-    <div class="kv"><span class="k">점유</span><span class="v">${u.occ?'입주':'공실'}</span></div>
-    <div class="kv"><span class="k">모듈 타입</span><span class="v" style="font-weight:600">${u.typeNm} <small style="color:var(--muted2)">${u.type}</small></span></div>
-    <div class="kv"><span class="k">개체 ID</span><span class="v" style="font-family:monospace">${u.id}</span></div>
-    <div class="kv"><span class="k">제조 번호</span><span class="v" style="font-family:monospace">${u.serial}</span></div>
-    <div class="kv"><span class="k">센서 연결</span><span class="v">${u.occ?'7개 정상':'—'}</span></div>
-    ${al.length?`<div class="sec" style="margin-top:14px">관련 알람</div>${al.map(a=>
-      `<div class="kv"><span class="k"><span class="sevDot sev${a.sev}"></span>${a.type}</span>
-       <span class="v" style="font-weight:600;font-size:11px">${a.at}</span></div>`).join('')}`:''}
-    ${rq.length?`<div class="sec" style="margin-top:14px">관련 민원</div>${rq.map(r=>
-      `<div class="kv"><span class="k">${r.sub}</span><span class="v"><span class="pill ${r.st==='done'?'ok':'info'}">${RSTATUS[r.st]}</span></span></div>`).join('')}`:''}
-    <div class="empty" style="margin-top:14px;text-align:left">담당 부서 <b>시설관리팀</b> · 대표 채널 1600-0000<br>
-      <span style="color:var(--muted2)">개인 연락처는 노출하지 않습니다 (FR-CSM-04)</span></div>`,
-    `<button class="btn" onclick="closeAll()">닫기</button>
-     <button class="btn pri" onclick="closeAll();openWoNew({sp:'${u.id}'})">작업 지시 생성 ›</button>`,620);
+  openDetail({
+    title:`${u.id} · ${u.typeNm}`, subtitle:'개체 상세 · FR-DTM-04',
+    sections:[
+      {label:'개요', body:`
+        <div class="kpiRow" style="grid-template-columns:1fr 1fr 1fr">
+          <div class="kpi"><div class="kl2">이달 전력</div><div class="kv2 num">${fx(u.kwh)}<small>kWh</small></div>
+            <div class="ks">동일 타입 평균 ${fx(typeAvg)}</div></div>
+          <div class="kpi ${u.al?'danger':'ok'}"><div class="kl2">활성 알람</div><div class="kv2 num">${u.al}<small>건</small></div></div>
+          <div class="kpi ${u.req?'warn':'ok'}"><div class="kl2">미처리 민원</div><div class="kv2 num">${u.req}<small>건</small></div></div>
+        </div>
+        <div class="sec" style="margin-top:14px">기본 정보</div>
+        <div class="kv"><span class="k">점유</span><span class="v">${u.occ?'입주':'공실'}</span></div>
+        <div class="kv"><span class="k">모듈 타입</span><span class="v" style="font-weight:600">${u.typeNm} <small style="color:var(--muted2)">${u.type}</small></span></div>
+        <div class="kv"><span class="k">개체 ID</span><span class="v" style="font-family:monospace">${u.id}</span></div>
+        <div class="kv"><span class="k">제조 번호</span><span class="v" style="font-family:monospace">${u.serial}</span></div>
+        <div class="kv"><span class="k">센서 연결</span><span class="v">${u.occ?'7개 정상':'—'}</span></div>
+        <div class="empty" style="margin-top:14px;text-align:left">담당 부서 <b>시설관리팀</b> · 대표 채널 1600-0000<br>
+          <span style="color:var(--muted2)">개인 연락처는 노출하지 않습니다 (FR-CSM-04)</span></div>`},
+      {label:`관련 알람 ${al.length}`, body: al.length
+        ? al.map(a=>`<button class="sensorRow" onclick="openAlarm('${a.id}')">
+            <span class="si"><span class="sevDot sev${a.sev}"></span></span>
+            <span style="flex:1;min-width:0"><span class="sn">${a.type}</span><span class="st">${a.id} · ${a.at}</span></span>
+            <span class="sv2" style="color:var(--muted2)">›</span></button>`).join('')
+        : `<div class="empty">활성 알람이 없습니다</div>`},
+      {label:`관련 민원 ${rq.length}`, body: rq.length
+        ? rq.map(r=>`<button class="sensorRow" onclick="openReqAdmin('${r.id}')">
+            <span class="si">📋</span>
+            <span style="flex:1;min-width:0"><span class="sn">${r.sub}</span><span class="st">${r.id} · ${r.at}</span></span>
+            <span class="sv2"><span class="pill ${r.st==='done'?'ok':'info'}">${RSTATUS[r.st]}</span></span></button>`).join('')
+        : `<div class="empty">미처리 민원이 없습니다</div>`},
+    ],
+    actions:[{label:'작업 지시 생성 ›',kind:'primary',fn:()=>openWoNew({sp:u.id})}],
+  });
 }
 
 
@@ -258,6 +270,7 @@ export function pgAlarm(){
           ${[[1,'즉시 · 담당자 + 상위자'],[2,'즉시 · 담당자'],[3,'대시보드 집계'],[4,'일 1회 집계']].map(([s,d])=>
             `<div class="kv"><span class="k"><span class="sevDot sev${s}"></span>${SEV[s].nm}</span><span class="v" style="font-size:11px">${d}</span></div>`).join('')}
           <button class="btn" style="width:100%;margin-top:10px" onclick="openEscalation()">발송 이력 · 에스컬레이션 →</button>
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px">발송 이력은 알람 상세의 「발송 이력」 탭에서도 볼 수 있습니다</div>
         </div></div>
     </div>
   </div>`;
@@ -269,28 +282,36 @@ export function openAlarm(id){
   const a=ALARMS.find(x=>x.id===id); if(!a)return;
   const flow=['occurred','ack','acting','done'], ci=flow.indexOf(a.st);
   const wo=WORKORDERS.find(w=>w.src===a.id);
-  dlgOpen(`${a.type}`,`${a.id} · ${SEV[a.sev].nm}`,`
-    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-      <span class="pill ${SEV[a.sev].c} dot">${SEV[a.sev].nm}</span>
-      <span class="pill mute">${a.loc}</span><span class="pill mute">${a.eq}</span>
-      ${a.rep>1?`<span class="pill warn">반복 ${a.rep}회</span>`:''}</div>
-    <div class="sec">상태 전이 <span class="srcb calc">상태 머신</span></div>
-    <div class="stepFlow" style="margin-bottom:6px">${flow.map((f,i)=>
-      `<span class="sf ${i<ci?'done':i===ci?'cur':''}">${ASTATUS[f]}</span>`).join('<span class="sa">›</span>')}</div>
-    <div style="font-size:10.5px;color:var(--muted2);margin-bottom:14px">
-      허용 전이: 발생→확인→조치 중→완료 / 확인→보류→확인. 그 외는 E-FLOW-001로 거부됩니다.</div>
-    <div class="sec">원인 데이터</div>
-    <div class="kv"><span class="k">감지 근거</span><span class="v" style="font-weight:600;font-size:11.5px;text-align:right;max-width:60%">${a.src}</span></div>
-    <div class="kv"><span class="k">발생 시각</span><span class="v num">${a.at}</span></div>
-    <div class="kv"><span class="k">권장 조치</span><span class="v" style="font-weight:600;font-size:11.5px;text-align:right;max-width:60%">${a.act}</span></div>
-    ${wo?`<div class="sec" style="margin-top:14px">연결 작업 지시</div>
-      <div class="kv"><span class="k">${wo.id}</span><span class="v"><span class="pill info">${WSTATUS[wo.st]}</span></span></div>
-      <div class="kv"><span class="k">${wo.nm}</span><span class="v" style="font-weight:600;font-size:11px">${wo.assignee}</span></div>`
-      :`<div class="empty" style="margin-top:14px">연결된 작업 지시가 없습니다</div>`}`,
-    `<button class="btn" onclick="closeAll()">닫기</button>
-     ${!wo?`<button class="btn" onclick="closeAll();openWoNew({trg:'알람',src:'${a.id}',nm:'${a.type} 조치',sp:'${a.loc}',eq:'${a.eq}',pri:'${SEV[a.sev].nm}'})">작업 지시 생성</button>`:''}
-     ${a.st!=='done'?`<button class="btn" onclick="alarmNext('${a.id}','hold')">보류</button>
-     <button class="btn pri" onclick="alarmNext('${a.id}','next')">${ci<flow.length-1?ASTATUS[flow[ci+1]]+'로 전환':'완료'}</button>`:''}`,660);
+  openDetail({
+    title:a.type, subtitle:`${a.id} · ${SEV[a.sev].nm}`,
+    sections:[
+      {label:'상세', body:`
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <span class="pill ${SEV[a.sev].c} dot">${SEV[a.sev].nm}</span>
+          <span class="pill mute">${a.loc}</span><span class="pill mute">${a.eq}</span>
+          ${a.rep>1?`<span class="pill warn">반복 ${a.rep}회</span>`:''}</div>
+        <div class="sec">상태 전이 <span class="srcb calc">상태 머신</span></div>
+        <div class="stepFlow" style="margin-bottom:6px">${flow.map((f,i)=>
+          `<span class="sf ${i<ci?'done':i===ci?'cur':''}">${ASTATUS[f]}</span>`).join('<span class="sa">›</span>')}</div>
+        <div style="font-size:10.5px;color:var(--muted2);margin-bottom:14px">
+          허용 전이: 발생→확인→조치 중→완료 / 확인→보류→확인. 그 외는 E-FLOW-001로 거부됩니다.</div>
+        <div class="sec">원인 데이터</div>
+        <div class="kv"><span class="k">감지 근거</span><span class="v" style="font-weight:600;font-size:11.5px;text-align:right;max-width:60%">${a.src}</span></div>
+        <div class="kv"><span class="k">발생 시각</span><span class="v num">${a.at}</span></div>
+        <div class="kv"><span class="k">권장 조치</span><span class="v" style="font-weight:600;font-size:11.5px;text-align:right;max-width:60%">${a.act}</span></div>
+        ${wo?`<div class="sec" style="margin-top:14px">연결 작업 지시</div>
+          <div class="kv"><span class="k">${wo.id}</span><span class="v"><span class="pill info">${WSTATUS[wo.st]}</span></span></div>
+          <div class="kv"><span class="k">${wo.nm}</span><span class="v" style="font-weight:600;font-size:11px">${wo.assignee}</span></div>`
+          :`<div class="empty" style="margin-top:14px">연결된 작업 지시가 없습니다</div>`}`},
+      /* 발송 이력 — 별도 모달이던 것을 알람 상세의 탭으로 흡수했다 (FR-MON-06) */
+      {label:'발송 이력', body:escalationBody()},
+    ],
+    actions:[
+      !wo&&{label:'작업 지시 생성',fn:()=>openWoNew({trg:'알람',src:a.id,nm:`${a.type} 조치`,sp:a.loc,eq:a.eq,pri:SEV[a.sev].nm})},
+      a.st!=='done'&&{label:'보류',fn:()=>alarmNext(a.id,'hold')},
+      a.st!=='done'&&{label:ci<flow.length-1?ASTATUS[flow[ci+1]]+'로 전환':'완료',kind:'primary',fn:()=>alarmNext(a.id,'next')},
+    ],
+  });
 }
 
 export function alarmNext(id,mode){
@@ -300,11 +321,19 @@ export function alarmNext(id,mode){
   else{a.st=flow[Math.min(ci+1,flow.length-1)];
     logAudit('알람 상태 변경',`${a.id} → ${ASTATUS[a.st]}`);
     toast(`${a.id} → ${ASTATUS[a.st]} 전환 · 처리자 ${state.loginUser} 이력 기록`);}
-  closeAll(); renderSideNav(); renderPage(); renderNotiBadge();
+  clearDetail(); renderSideNav(); renderPage(); renderNotiBadge();
 }
 
+/* 발송 이력 버튼 — 같은 정보에 진입 경로를 두 개 만들지 않기 위해
+   가장 시급한 미처리 알람의 상세를 열고 「발송 이력」 탭으로 이동한다 */
 export function openEscalation(){
-  dlgOpen('알림 발송 이력','FR-MON-06 · 채널 · 수신 확인 · 에스컬레이션',`
+  const a=ALARMS.filter(x=>x.st!=='done').sort((x,y)=>x.sev-y.sev)[0]||ALARMS[0];
+  openAlarm(a.id); setDetailTab(1);
+}
+
+/* 알림 발송 이력 — 알람 상세의 탭 본문 (단독 모달이 아니다) */
+export function escalationBody(){
+  return `
     <table class="tbl"><thead><tr><th>시각</th><th>알람</th><th>채널</th><th>수신자</th><th>결과</th></tr></thead><tbody>
       <tr><td class="num" style="font-size:11px">16:52:04</td><td class="str">AL-2608-041 누수</td><td>대시보드 + 문자</td><td>이재훈 · 최은영</td><td><span class="pill ok">확인 02:11</span></td></tr>
       <tr><td class="num" style="font-size:11px">16:30:12</td><td class="str">AL-2608-040 CO₂</td><td>대시보드</td><td>김성호</td><td><span class="pill ok">확인 04:38</span></td></tr>
@@ -316,8 +345,7 @@ export function openEscalation(){
     <div class="empty" style="text-align:left;margin-top:12px;font-size:10.5px">
       긴급 알람이 <b>10분</b> 내 확인되지 않으면 상위 담당자에게 자동 에스컬레이션됩니다.
       야간(22~07시) 보통·낮음 알람은 발송을 억제하고 익일 집계로 전환합니다.
-      <span style="color:var(--purple)">모바일 푸시 발송은 데모 범위 밖 — 발송 기록만 표시합니다.</span></div>`,
-    `<button class="btn pri" onclick="closeAll()">닫기</button>`,720);
+      <span style="color:var(--purple)">모바일 푸시 발송은 데모 범위 밖 — 발송 기록만 표시합니다.</span></div>`;
 }
 
 
@@ -380,37 +408,44 @@ export function openReqAdmin(id){
   const r=REQUESTS.find(x=>x.id===id); if(!r)return;
   const si=RSTEPS.indexOf(r.st);
   const cands=[{n:'김성호',t:'시설관리 · 설비',load:4},{n:'박지훈',t:'시설관리 · 시설',load:2},{n:'이재훈',t:'시설관리 · 배관',load:5}];
-  dlgOpen(`${r.sub}`,`${r.id} · ${r.sp}`,`
-    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-      <span class="pill ${r.urg==='긴급'?'danger':r.urg==='보통'?'warn':'mute'} dot">${r.urg}</span>
-      <span class="pill mute">${r.cat} › ${r.sub}</span>
-      ${r.rep>=3?'<span class="pill danger">반복 민원</span>':''}
-      ${r.photos?`<span class="pill info">사진 ${r.photos}장</span>`:''}</div>
-    <div class="stepFlow" style="margin-bottom:14px">${RSTEPS.map((s,i)=>
-      `<span class="sf ${i<si?'done':i===si?'cur':''}">${RSTATUS[s]}</span>`).join('<span class="sa">›</span>')}</div>
-    <div class="sec">접수 내용</div>
-    <div style="background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-m);padding:11px 12px;
-      font-size:12px;line-height:1.7;margin-bottom:14px">${r.desc}</div>
-    <div class="sec">자동 분류 <span class="srcb pred">추정</span></div>
-    <div class="kv"><span class="k">분류 결과</span><span class="v">${r.auto.cat}</span></div>
-    <div class="kv"><span class="k">신뢰도</span><span class="v num" style="color:${r.auto.conf>=0.8?'var(--ok)':'var(--warn)'}">${(r.auto.conf*100).toFixed(0)}%
-      ${r.auto.conf<0.7?'<span class="pill warn" style="margin-left:6px">분류 확인 필요</span>':''}</span></div>
-    <div class="sec" style="margin-top:14px">SLA</div>
-    <div class="kv"><span class="k">기한</span><span class="v num">${r.slaDue}</span></div>
-    <div class="kv"><span class="k">경과</span><span class="v"><span class="slaBar" style="display:inline-block;width:120px;vertical-align:middle">
-      <i style="width:${r.slaPct}%;background:${r.slaPct>=80?'#d64545':r.slaPct>=50?'#e08a12':'#1a9c6a'}"></i></span>
-      <span style="margin-left:7px">${r.slaPct}%</span></span></div>
-    ${r.visit?`<div class="kv"><span class="k">방문 예정</span><span class="v num">${r.visit}</span></div>`:''}
-    <div class="sec" style="margin-top:14px">담당자 추천 <span class="srcb calc">업무량 반영</span></div>
-    ${cands.map(c=>`<div class="kv"><span class="k">${c.n} <small>${c.t}</small></span>
-      <span class="v">${r.assignee&&r.assignee.includes(c.n)?'<span class="pill ok">배정됨</span>':
-      `<span style="font-size:11px;color:var(--muted);margin-right:8px">처리 중 ${c.load}건</span>
-       <button class="btn sm" onclick="assignReq('${r.id}','시설관리 ${c.n}')">배정</button>`}</span></div>`).join('')}
-    ${r.log.length?`<div class="sec" style="margin-top:14px">처리 이력</div>
-      <div class="tl">${r.log.map(l=>`<div class="tlItem i"><div class="tt">${l.t}</div><div class="tm">${l.m}</div></div>`).join('')}</div>`:''}`,
-    `<button class="btn" onclick="closeAll()">닫기</button>
-     <button class="btn" onclick="closeAll();openWoNew({trg:'민원',src:'${r.id}',nm:'${r.sub} 조치',sp:'${r.sp}',pri:'${r.urg}'})">작업 지시 생성</button>
-     ${r.st!=='done'?`<button class="btn pri" onclick="reqNext('${r.id}')">${RSTATUS[RSTEPS[Math.min(si+1,3)]]}로 전환</button>`:''}`,700);
+  openDetail({
+    title:r.sub, subtitle:`${r.id} · ${r.sp}`,
+    sections:[
+      {label:'접수 내용', body:`
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <span class="pill ${r.urg==='긴급'?'danger':r.urg==='보통'?'warn':'mute'} dot">${r.urg}</span>
+          <span class="pill mute">${r.cat} › ${r.sub}</span>
+          ${r.rep>=3?'<span class="pill danger">반복 민원</span>':''}
+          ${r.photos?`<span class="pill info">사진 ${r.photos}장</span>`:''}</div>
+        <div class="stepFlow" style="margin-bottom:14px">${RSTEPS.map((s,i)=>
+          `<span class="sf ${i<si?'done':i===si?'cur':''}">${RSTATUS[s]}</span>`).join('<span class="sa">›</span>')}</div>
+        <div class="sec">접수 내용</div>
+        <div style="background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-m);padding:11px 12px;
+          font-size:12px;line-height:1.7;margin-bottom:14px">${r.desc}</div>
+        <div class="sec">자동 분류 <span class="srcb pred">추정</span></div>
+        <div class="kv"><span class="k">분류 결과</span><span class="v">${r.auto.cat}</span></div>
+        <div class="kv"><span class="k">신뢰도</span><span class="v num" style="color:${r.auto.conf>=0.8?'var(--ok)':'var(--warn)'}">${(r.auto.conf*100).toFixed(0)}%
+          ${r.auto.conf<0.7?'<span class="pill warn" style="margin-left:6px">분류 확인 필요</span>':''}</span></div>`},
+      {label:'SLA · 배정', body:`
+        <div class="sec">SLA</div>
+        <div class="kv"><span class="k">기한</span><span class="v num">${r.slaDue}</span></div>
+        <div class="kv"><span class="k">경과</span><span class="v"><span class="slaBar" style="display:inline-block;width:120px;vertical-align:middle">
+          <i style="width:${r.slaPct}%;background:${r.slaPct>=80?'#d64545':r.slaPct>=50?'#e08a12':'#1a9c6a'}"></i></span>
+          <span style="margin-left:7px">${r.slaPct}%</span></span></div>
+        ${r.visit?`<div class="kv"><span class="k">방문 예정</span><span class="v num">${r.visit}</span></div>`:''}
+        <div class="sec" style="margin-top:14px">담당자 추천 <span class="srcb calc">업무량 반영</span></div>
+        ${cands.map(c=>`<div class="kv"><span class="k">${c.n} <small>${c.t}</small></span>
+          <span class="v">${r.assignee&&r.assignee.includes(c.n)?'<span class="pill ok">배정됨</span>':
+          `<span style="font-size:11px;color:var(--muted);margin-right:8px">처리 중 ${c.load}건</span>
+           <button class="btn sm" onclick="assignReq('${r.id}','시설관리 ${c.n}')">배정</button>`}</span></div>`).join('')}`},
+      r.log.length&&{label:`처리 이력 ${r.log.length}`, body:
+        `<div class="tl">${r.log.map(l=>`<div class="tlItem i"><div class="tt">${l.t}</div><div class="tm">${l.m}</div></div>`).join('')}</div>`},
+    ],
+    actions:[
+      {label:'작업 지시 생성',fn:()=>openWoNew({trg:'민원',src:r.id,nm:`${r.sub} 조치`,sp:r.sp,pri:r.urg})},
+      r.st!=='done'&&{label:`${RSTATUS[RSTEPS[Math.min(si+1,3)]]}로 전환`,kind:'primary',fn:()=>reqNext(r.id)},
+    ],
+  });
 }
 
 export function assignReq(id,who){
@@ -418,7 +453,10 @@ export function assignReq(id,who){
   r.assignee=who; if(r.st==='received')r.st='assigned';
   r.log.push({t:'08-08 17:45',m:`${who} 배정 · 처리자 ${state.loginUser}`});
   logAudit('민원 담당자 배정',`${id} → ${who}`);
-  closeAll(); renderSideNav(); renderPage(); toast(`${id} → ${who} 배정 · SLA 타이머 시작`);
+  renderSideNav(); renderPage();
+  const _tab=(state.detail.stack[state.detail.stack.length-1]||{}).tab||0;
+  popDetail(); openReqAdmin(id); setDetailTab(_tab);   // 상세 패널 갱신 · 탭 유지
+  toast(`${id} → ${who} 배정 · SLA 타이머 시작`);
 }
 
 export function reqNext(id){
@@ -426,7 +464,10 @@ export function reqNext(id){
   const i=RSTEPS.indexOf(r.st); r.st=RSTEPS[Math.min(i+1,3)];
   if(r.st==='done'){r.slaPct=100;r.log.push({t:'08-08 17:45',m:'처리 완료 · 만족도 평가 요청 발송'});}
   logAudit('민원 상태 변경',`${id} → ${RSTATUS[r.st]}`);
-  closeAll(); renderSideNav(); renderPage(); toast(`${id} → ${RSTATUS[r.st]}`);
+  renderSideNav(); renderPage();
+  const _tab=(state.detail.stack[state.detail.stack.length-1]||{}).tab||0;
+  popDetail(); openReqAdmin(id); setDetailTab(_tab);   // 상세 패널 갱신 · 탭 유지
+  toast(`${id} → ${RSTATUS[r.st]}`);
 }
 
 
@@ -893,19 +934,21 @@ export function safeNext(id){
 export function openCctv(id){
   const c=CCTVS.find(x=>x.id===id)||{id,nm:'—',st:'off'};
   logAudit('CCTV 영상 조회',`${id} · 이벤트 연계`);
-  dlgOpen(`📹 ${c.id}`,`${c.nm} · IF-CCTV`,`
-    <div class="cctv" style="aspect-ratio:16/9;margin-bottom:12px">
-      <span class="cl">${c.id}</span>${c.st==='rec'?'<span class="crec"><i></i>REC</span>':''}
-      <span class="cph" style="font-size:44px">📹</span>
-      <span class="ct2">2026-08-08 02:14:07 ~ 02:16:32</span></div>
-    <div class="kv"><span class="k">연계 인터페이스</span><span class="v">IF-CCTV · RTSP</span></div>
-    <div class="kv"><span class="k">조회 사유</span><span class="v">안전 이벤트 연계</span></div>
-    <div class="kv"><span class="k">조회자</span><span class="v">${state.loginUser} · ${ROLES[state.role].nm}</span></div>
-    <div class="empty" style="text-align:left;margin-top:12px;font-size:10.5px">
-      영상 스트리밍은 <b>데모 범위 밖</b>입니다. 실 연동 시 이벤트 발생 ±2분 구간만 조회되며,
-      조회 이력은 <b>감사 로그</b>에 자동 기록됩니다.</div>`,
-    `<button class="btn" onclick="closeAll()">닫기</button>
-     <button class="btn pri" onclick="closeAll();goPage('audit')">감사 로그 확인 ›</button>`,560);
+  openDetail({
+    title:`📹 ${c.id}`, subtitle:`${c.nm} · IF-CCTV`,
+    sections:[{label:'영상 조회', body:`
+      <div class="cctv" style="aspect-ratio:16/9;margin-bottom:12px">
+        <span class="cl">${c.id}</span>${c.st==='rec'?'<span class="crec"><i></i>REC</span>':''}
+        <span class="cph" style="font-size:44px">📹</span>
+        <span class="ct2">2026-08-08 02:14:07 ~ 02:16:32</span></div>
+      <div class="kv"><span class="k">연계 인터페이스</span><span class="v">IF-CCTV · RTSP</span></div>
+      <div class="kv"><span class="k">조회 사유</span><span class="v">안전 이벤트 연계</span></div>
+      <div class="kv"><span class="k">조회자</span><span class="v">${state.loginUser} · ${ROLES[state.role].nm}</span></div>
+      <div class="empty" style="text-align:left;margin-top:12px;font-size:10.5px">
+        영상 스트리밍은 <b>데모 범위 밖</b>입니다. 실 연동 시 이벤트 발생 ±2분 구간만 조회되며,
+        조회 이력은 <b>감사 로그</b>에 자동 기록됩니다.</div>`}],
+    actions:[{label:'감사 로그 확인 ›',kind:'primary',fn:()=>goPage('audit')}],
+  });
 }
 
 /* ══════════ SCR-14 감사 로그 (NF-012 · FR-ADM-02) ══════════ */
@@ -1054,4 +1097,4 @@ export function renderPartnerList(){
 
 
 /* 인라인 핸들러가 참조하는 심볼을 window 에 등록 (동작 유지) */
-Object.assign(window,{pgDash,pgMap,typeGroupSvg,tgLayer,setType,openUnit,pgAlarm,resetAlarmFilter,openAlarm,alarmNext,openEscalation,pgReq,openReqAdmin,assignReq,reqNext,pgWork,pgPartnerPerf,setChk,woHold,woApprove,openWoNew,drawWoNew,submitWo,pgEnergy8,pgReport,pgRec,recSet,pgSafety,safeNext,openCctv,pgAudit,logAudit,myWos,renderPartner,i2,poSet,poSubmit,renderPartnerList});
+Object.assign(window,{pgDash,pgMap,typeGroupSvg,tgLayer,setType,openUnit,pgAlarm,resetAlarmFilter,openAlarm,alarmNext,openEscalation,escalationBody,pgReq,openReqAdmin,assignReq,reqNext,pgWork,pgPartnerPerf,setChk,woHold,woApprove,openWoNew,drawWoNew,submitWo,pgEnergy8,pgReport,pgRec,recSet,pgSafety,safeNext,openCctv,pgAudit,logAudit,myWos,renderPartner,i2,poSet,poSubmit,renderPartnerList});

@@ -476,6 +476,30 @@ table.tbl td.str{font-weight:700;color:var(--ink)}
 .heatCell:hover{transform:scale(1.14);z-index:3;box-shadow:0 2px 8px #0f213a3d}
 
 /* ══════════ 모달 ══════════ */
+/* ── 공용 상세 패널 (render/detail.js) : 인페이지 · 마스크 없이 우측 도킹 ── */
+.detailPanel{position:fixed;top:52px;right:0;bottom:0;width:470px;max-width:96vw;z-index:260;
+  background:var(--panel);border-left:1px solid var(--line);box-shadow:-14px 0 40px #0b1b3218;
+  display:flex;flex-direction:column;animation:dpIn .18s var(--e)}
+@keyframes dpIn{from{transform:translateX(24px);opacity:.4}to{transform:none;opacity:1}}
+.detailPanel.hidden{display:none}
+.dpHead{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);
+  background:var(--panel2);flex:0 0 auto}
+.dpBack,.dpX{width:26px;height:26px;border-radius:8px;border:1px solid var(--line);background:#fff;
+  font-size:13px;color:var(--ink2);cursor:pointer;flex:0 0 auto}
+.dpBack:hover,.dpX:hover{border-color:var(--blue-line);color:var(--blue)}
+.dpT{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.dpTitle{font-size:13.5px;font-weight:800;letter-spacing:-.02em;color:var(--ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpSub{font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpDepth{font-size:9.5px;font-weight:700;color:var(--muted2);border:1px solid var(--line);
+  border-radius:9px;padding:2px 7px;background:#fff;flex:0 0 auto}
+.dpTabs{display:flex;gap:3px;padding:8px 12px 0;border-bottom:1px solid var(--line);flex:0 0 auto;overflow-x:auto}
+.dpTabs button{padding:7px 12px;border-radius:8px 8px 0 0;font-size:11.5px;font-weight:700;color:var(--muted);
+  white-space:nowrap;border-bottom:2px solid transparent}
+.dpTabs button.on{color:var(--navy);background:var(--panel2);border-bottom-color:var(--navy)}
+.dpBody{flex:1;min-height:0;overflow-y:auto;padding:13px 14px}
+.dpFoot{display:flex;gap:7px;justify-content:flex-end;padding:11px 14px;border-top:1px solid var(--line);
+  background:var(--panel2);flex:0 0 auto}
 .mask{position:fixed;inset:0;background:#0b1b3259;z-index:290;backdrop-filter:blur(2px)}
 .dlg{position:fixed;z-index:300;background:var(--panel);border-radius:16px;box-shadow:var(--shadow-l);
   top:50%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;max-height:92vh;overflow:hidden}
@@ -837,6 +861,8 @@ table.tbl td.str{font-weight:700;color:var(--ink)}
 
 <div class="mask hidden" id="mask" onclick="closeAll()"></div>
 <div class="dlg hidden" id="dlg"></div>
+<!-- 공용 상세 패널 (render/detail.js) — 인페이지 · 마스크 없음 -->
+<div class="detailPanel hidden" id="detailPanel"></div>
 <div id="toast" class="hidden"></div>
 
 <script type="module">

@@ -22,6 +22,8 @@ export const state={
   planMode:'2d',
   view3d:{ yaw:-34, pitch:36, zoom:1, panX:0, panY:0, cutaway:true, wallCut:1.25,
            layers:{frame:true, door:true, fix:true, ceiling:false, jet:false, porch:false} },
+  /* 공용 상세 패널 스택 (render/detail.js) — L3 상세는 전부 여기로 */
+  detail:{ stack:[] },
   /* 작업 지시 생성 (FR-MNT-02) */
   woDraft:{},
   /* 민원 접수 폼 (페이지 내 인라인 · FR-CSM-01) */

@@ -6,6 +6,7 @@ import {$,COMMON,COMPLEX,ENVSYS,UNIT_REF,app,fx,spaceOf,won} from '../data/modul
 import {MODULE} from '../data/moduleUnit.js';
 import {ALARMS,COSTS,NEIGHBOR,NOTI,RECS,REQUESTS,SAFETY,WORKORDERS} from '../data/ops.js';
 import {state} from '../data/state.js';
+import {clearDetail,detailDepth,popDetail} from './detail.js';
 import {myWos,pgAlarm,pgAudit,pgDash,pgEnergy8,pgMap,pgRec,pgReport,pgReq,pgSafety,pgWork,renderPartner} from '../pages/admin.js';
 import {backToSummary,pgEnergyRes,pgEnvpred,pgHistory,pgHome,pgLifespan,pgMaterial,pgNeighbor,pgPipe,pgRemodel,pgReqstat,pgRequest,pgRoadmap,pgScenario,pgTransfer,renderPipe,renderPlan,renderReqForm,renderReqPlan,renderRight,selectRoom} from '../pages/resident.js';
 
@@ -84,7 +85,8 @@ export function renderSideNav(){
   $('sideNav').innerHTML=s;
 }
 
-export function goPage(k){state.page=k;renderSideNav();renderPage();$('mainArea').scrollTop=0;}
+/* 페이지를 옮기면 상세 스택은 비운다 (같은 정보에 진입 경로를 남기지 않는다) */
+export function goPage(k){clearDetail();state.page=k;renderSideNav();renderPage();$('mainArea').scrollTop=0;}
 
 export function renderPage(){
   const p=PAGES[state.page]; if(!p)return;
@@ -222,6 +224,8 @@ export function toggleFocus(){state.bare=!state.bare;app.classList.toggle('bare'
 document.addEventListener('keydown',e=>{
   if(e.key!=='Escape')return;
   if(!$('dlg').classList.contains('hidden'))return closeAll();
+  /* 상세 패널은 스택이므로 한 단계씩 후퇴. 비면 아래 단계로 내려간다 */
+  if(detailDepth()>0)return void popDetail();
   if(state.drawerOpen)return toggleDrawer();
   if(state.aiOpen)return toggleAi();
   if(state.bare){state.bare=false;app.classList.remove('bare');return;}

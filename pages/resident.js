@@ -6,6 +6,7 @@ import {ENERGY,ENVPRED,HOMEHIST,NEIGHBOR,NOTI,REMODEL,REQUESTS,RISKS,SAFETY,SCEN
 import {state} from '../data/state.js';
 import {gaugeArc,svgArea,svgBars,svgMulti} from '../render/chart.js';
 import {closeAll,dlgOpen,pgHead,renderPage,renderSideNav,toast} from '../render/shell.js';
+import {openDetail,popDetail,clearDetail} from '../render/detail.js';
 import {render3D,toggle3DLayer,toggle3DCut,spin3D,zoom3D,reset3D} from '../render/scene3d.js';
 /* 3D 뷰의 인라인 핸들러도 window 에 등록한다 (2D 와 같은 방식) */
 Object.assign(window,{render3D,toggle3DLayer,toggle3DCut,spin3D,zoom3D,reset3D});
@@ -144,7 +145,7 @@ export function renderPlan(){
       if(fits){
         list.forEach((dv,i)=>{
           const cx=x+11+(i%cols)*22, cy=y+h-12-Math.floor(i/cols)*20;
-          s+=`<g class="devDot" onclick="event.stopPropagation();openDevice('${sp.id}','${dv.id}')">
+          s+=`<g class="devDot" onclick="event.stopPropagation();selectRoom('${sp.id}');selectSensor('${dv.id}')">
             <circle cx="${cx}" cy="${cy}" r="8.5" fill="${dv.meas.on?'#0877ed':'#c3ccd8'}" stroke="#fff" stroke-width="1.6"/>
             <text x="${cx}" y="${cy+3.4}" text-anchor="middle" font-size="8.5" fill="#fff">${STYPE[dv.type].icon}</text></g>`;});
       }else{
@@ -323,7 +324,11 @@ export function sensorPanel(){
       </div>
       ${s.type!=='SEA'?`<div class="kv" style="margin-top:10px"><span class="k">현재 소비전력</span>
         <span class="v num">${s.meas.on?fx(s.meas.w,1):'0.0'} W</span></div>`:''}
+      <div class="kv"><span class="k">설치 공간</span><span class="v" style="font-weight:600">${spaceOf(rid).nm}</span></div>
     </div></div>
+  <div class="card"><div class="ch"><span class="ct"><span class="ci">${ty.icon}</span>기기 제어</span>
+      <span class="cx">${ty.nm} · ${s.id}</span></div>
+    <div class="cb" style="text-align:center">${deviceControl(s)}</div></div>
   <div class="card"><div class="cb">
     <div class="chartHead"><span class="cht">온습도</span>${per()}</div>
     <div class="chartVals"><div>현재 온도<b>${fx(d.temp)}°C</b></div><div>현재 습도<b>${fx(d.humi)}%</b></div>
@@ -346,49 +351,43 @@ export function toggleSensor(sid){
   s.meas.on=!s.meas.on; renderPlan(); renderRight(); toast(`${s.nm} ${s.meas.on?'ON':'OFF'}`);
 }
 
-export function openDevice(rid,sid){
-  const s=devicesOf(rid).find(x=>x.id===sid); if(!s)return;
-  state.selRoom=rid; const ty=STYPE[s.type];
-  if(state.devState[sid]===undefined)state.devState[sid]=DEV_CTRL_INIT[sid]!==undefined?DEV_CTRL_INIT[sid]:(s.meas.on?100:0);
+/* ── 기기 제어 — 우측 패널 3단의 유일한 제어면 ──────────────────
+   2D 평면도 아이콘 · 3D 씬 폴리곤 · 목록 행이 모두 selectRoom+selectSensor 로
+   여기 도달한다. 별도 제어 모달(openDevice)은 제거했다.               */
+export function deviceControl(s){
+  const sid=s.id;
+  if(state.devState[sid]===undefined)
+    state.devState[sid]=DEV_CTRL_INIT[sid]!==undefined?DEV_CTRL_INIT[sid]:(s.meas.on?100:0);
   const pct=state.devState[sid];
   const modeOf=p=>p>=95?'완전개방':p<=5?'닫힘':p>=45&&p<=55?'분할개방':'부분개방';
-  const isBlind=s.type==='SEC', isDim=s.type==='SEL';
-  $('dlg').className='dlg devDlg'; $('dlg').style.width=''; $('dlg').innerHTML=`
-    <div class="dh2"><span class="dt3">${ty.icon} ${s.nm}</span>
-      <span style="display:flex;align-items:center;gap:10px"><span class="dm2">${ty.nm} · ${s.id}</span>
-      <button class="dx" onclick="closeAll()">✕</button></span></div>
-    <div class="dbd" style="padding:20px 22px">
-      <div class="devIcon">${ty.icon}</div>
-      <div class="devMode">${isBlind?modeOf(pct):isDim?'밝기':'전원 상태'}</div>
-      <div class="devPct">${isBlind||isDim?pct+'%':(s.meas.on?'ON':'OFF')}</div>
-      ${isBlind||isDim?`<input class="devSlider" type="range" min="0" max="100" value="${pct}" oninput="devSet('${sid}',this.value)">`:''}
-      ${isBlind?`<div class="devBtns">
-          <button onclick="devSet('${sid}',100)">▲ 올림</button>
-          <button onclick="devStop('${sid}')">■ 정지</button>
-          <button onclick="devSet('${sid}',0)">▼ 내림</button></div>`
-       :`<div class="devBtns" style="grid-template-columns:1fr 1fr">
-          <button onclick="devPower('${sid}',true)" style="${s.meas.on?'border-color:var(--blue);color:var(--blue);background:var(--blue-soft)':''}">ON</button>
-          <button onclick="devPower('${sid}',false)" style="${!s.meas.on?'border-color:var(--danger);color:var(--danger);background:var(--danger-soft)':''}">OFF</button></div>`}
-      <div class="kv" style="margin-top:16px"><span class="k">현재 소비전력</span><span class="v num">${s.meas.on?fx(s.meas.w,1):'0.0'} W</span></div>
-      <div class="kv"><span class="k">설치 공간</span><span class="v" style="font-weight:600">${spaceOf(rid).nm}</span></div>
-      <div class="kv"><span class="k">제어 방식 <small>FR-SIM-10 가드레일 적용</small></span><span class="v" style="font-weight:600">수동 · 즉시</span></div>
-    </div>
-    <div class="dft"><button class="btn" onclick="closeAll()">닫기</button>
-      <button class="btn pri" onclick="closeAll();selectSensor('${sid}')">센서 상세 ›</button></div>`;
-  $('mask').classList.remove('hidden'); $('dlg').classList.remove('hidden');
+  const isBlind=s.type==='SEC', isDim=s.type==='SEL', isSensor=s.type==='SEA';
+  if(isSensor)return `<div class="empty" style="text-align:left">환경센서는 항상 동작하며 제어 대상이 아닙니다</div>`;
+  return `
+    <div class="devMode">${isBlind?modeOf(pct):isDim?'밝기':'전원 상태'}</div>
+    <div class="devPct">${isBlind||isDim?pct+'%':(s.meas.on?'ON':'OFF')}</div>
+    ${isBlind||isDim?`<input class="devSlider" type="range" min="0" max="100" value="${pct}" oninput="devSet('${sid}',this.value)">`:''}
+    ${isBlind?`<div class="devBtns">
+        <button onclick="devSet('${sid}',100)">▲ 올림</button>
+        <button onclick="devStop('${sid}')">■ 정지</button>
+        <button onclick="devSet('${sid}',0)">▼ 내림</button></div>`
+     :`<div class="devBtns" style="grid-template-columns:1fr 1fr">
+        <button onclick="devPower('${sid}',true)" style="${s.meas.on?'border-color:var(--blue);color:var(--blue);background:var(--blue-soft)':''}">ON</button>
+        <button onclick="devPower('${sid}',false)" style="${!s.meas.on?'border-color:var(--danger);color:var(--danger);background:var(--danger-soft)':''}">OFF</button></div>`}
+    <div class="kv" style="margin-top:14px"><span class="k">제어 방식 <small>FR-SIM-10 가드레일 적용</small></span>
+      <span class="v" style="font-weight:600">수동 · 즉시</span></div>`;
 }
 
 export function devSet(sid,v){
   state.devState[sid]=+v; const s=devicesOf(state.selRoom).find(x=>x.id===sid);
   if(s)s.meas.on=+v>0;                 // 조광·개폐율은 devState 에만 보관
-  openDevice(state.selRoom,sid); renderPlan();
+  renderPlan(); renderRight();
 }
 
 export function devStop(){toast('정지 — 현재 위치에서 멈춤');}
 
 export function devPower(sid,on){
   const s=devicesOf(state.selRoom).find(x=>x.id===sid); if(!s)return;
-  s.meas.on=on; state.devState[sid]=on?100:0; openDevice(state.selRoom,sid); renderPlan();
+  s.meas.on=on; state.devState[sid]=on?100:0; renderPlan(); renderRight();
 }
 
 
@@ -912,34 +911,38 @@ export function submitReq(){
 export function openMyReq(id){
   const r=REQUESTS.find(x=>x.id===id); if(!r)return;
   const si=RSTEPS.indexOf(r.st), done=r.st==='done';
-  dlgOpen(r.sub,`${r.id} · ${r.at}`,`
-    <div class="stepFlow" style="margin-bottom:16px">${RSTEPS.map((s,i)=>
-      `<span class="sf ${i<si?'done':i===si?'cur':''}">${RSTATUS[s]}</span>`).join('<span class="sa">›</span>')}</div>
-    <div class="sec">접수 내용</div>
-    <div style="background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-m);padding:11px 12px;
-      font-size:12px;line-height:1.7;margin-bottom:14px">${r.desc}</div>
-    <div class="kv"><span class="k">담당 조직</span><span class="v">${r.assignee?'시설관리팀':'배정 중'}</span></div>
-    <div class="kv"><span class="k">처리 목표</span><span class="v num">${r.slaDue}</span></div>
-    ${r.visit?`<div class="kv"><span class="k">방문 예정</span><span class="v num" style="color:var(--blue)">${r.visit}</span></div>`:''}
-    <div class="kv"><span class="k">문의</span><span class="v">관리사무소 1600-0000</span></div>
-    ${r.log.length?`<div class="sec" style="margin-top:14px">처리 진행</div>
-      <div class="tl">${r.log.map(l=>`<div class="tlItem i"><div class="tt">${l.t}</div><div class="tm">${l.m}</div></div>`).join('')}</div>`:''}
-    ${done?(r.sat===null?`
-      <div class="sec" style="margin-top:16px">만족도 평가 <span class="srcb calc">FR-CSM-05</span></div>
-      <div style="display:flex;gap:6px;justify-content:center;margin:10px 0">
-        ${[1,2,3,4,5].map(n=>`<button class="btn" style="width:46px;height:46px;font-size:19px;padding:0"
-          onclick="rateReq('${r.id}',${n})">★</button>`).join('')}</div>
-      <div style="text-align:center;font-size:11px;color:var(--muted2)">평가 기간 7일 · 미응답 시 미평가로 확정됩니다</div>
-      <button class="btn dz" style="width:100%;margin-top:10px" onclick="reopenReq('${r.id}')">해결되지 않았습니다 · 재접수</button>`
-      :`<div class="kv" style="margin-top:14px"><span class="k">만족도 평가</span>
-        <span class="v" style="color:var(--warn)">${'★'.repeat(r.sat)}${'☆'.repeat(5-r.sat)} ${r.sat}점</span></div>`):''}`,
-    `<button class="btn pri" onclick="closeAll()">닫기</button>`,540);
+  openDetail({
+    title:r.sub, subtitle:`${r.id} · ${r.at}`,
+    sections:[
+      {label:'진행 상황', body:`
+        <div class="stepFlow" style="margin-bottom:16px">${RSTEPS.map((s,i)=>
+          `<span class="sf ${i<si?'done':i===si?'cur':''}">${RSTATUS[s]}</span>`).join('<span class="sa">›</span>')}</div>
+        <div class="sec">접수 내용</div>
+        <div style="background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-m);padding:11px 12px;
+          font-size:12px;line-height:1.7;margin-bottom:14px">${r.desc}</div>
+        <div class="kv"><span class="k">담당 조직</span><span class="v">${r.assignee?'시설관리팀':'배정 중'}</span></div>
+        <div class="kv"><span class="k">처리 목표</span><span class="v num">${r.slaDue}</span></div>
+        ${r.visit?`<div class="kv"><span class="k">방문 예정</span><span class="v num" style="color:var(--blue)">${r.visit}</span></div>`:''}
+        <div class="kv"><span class="k">문의</span><span class="v">관리사무소 1600-0000</span></div>
+        ${done?(r.sat===null?`
+          <div class="sec" style="margin-top:16px">만족도 평가 <span class="srcb calc">FR-CSM-05</span></div>
+          <div style="display:flex;gap:6px;justify-content:center;margin:10px 0">
+            ${[1,2,3,4,5].map(n=>`<button class="btn" style="width:46px;height:46px;font-size:19px;padding:0"
+              onclick="rateReq('${r.id}',${n})">★</button>`).join('')}</div>
+          <div style="text-align:center;font-size:11px;color:var(--muted2)">평가 기간 7일 · 미응답 시 미평가로 확정됩니다</div>
+          <button class="btn dz" style="width:100%;margin-top:10px" onclick="reopenReq('${r.id}')">해결되지 않았습니다 · 재접수</button>`
+          :`<div class="kv" style="margin-top:14px"><span class="k">만족도 평가</span>
+            <span class="v" style="color:var(--warn)">${'★'.repeat(r.sat)}${'☆'.repeat(5-r.sat)} ${r.sat}점</span></div>`):''}`},
+      r.log.length&&{label:`처리 진행 ${r.log.length}`, body:
+        `<div class="tl">${r.log.map(l=>`<div class="tlItem i"><div class="tt">${l.t}</div><div class="tm">${l.m}</div></div>`).join('')}</div>`},
+    ],
+  });
 }
 
 export function rateReq(id,n){
   const r=REQUESTS.find(x=>x.id===id); if(!r)return;
   r.sat=n; r.log.push({t:'08-08 17:46',m:`만족도 ${n}점 등록`});
-  closeAll(); renderPage(); toast(`만족도 ${n}점이 등록되었습니다. 의견 감사합니다`);
+  clearDetail(); renderPage(); toast(`만족도 ${n}점이 등록되었습니다. 의견 감사합니다`);
 }
 
 export function reopenReq(id){
@@ -948,15 +951,17 @@ export function reopenReq(id){
   REQUESTS.unshift({...o,id:nid,st:'received',assignee:null,slaPct:2,sat:null,visit:null,rep:o.rep+1,
     at:'08-08 17:46',log:[{t:'08-08 17:46',m:`재접수 · 원 민원 ${id} 연결`},
       {t:'08-08 17:46',m:'「재접수」 태그 부여 · 반복 민원 지표에 가중 반영'}]});
-  closeAll(); renderSideNav(); renderPage();
+  clearDetail(); renderSideNav(); renderPage();
   toast(`재접수 완료 (${nid}) — 원 민원과 연결되었습니다`);
 }
 
 /* 월간 리포트 (FR-RPT-01) */
 export function openReport(){
   const isRes=state.role==='resident';
-  dlgOpen('2026년 7월 운영 리포트',isRes?'우리 세대 요약':'단지 전체 · 확정본 v1.2',`
-    <div class="kpiRow" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+  openDetail({
+    title:'2026년 7월 운영 리포트', subtitle:isRes?'우리 세대 요약':'단지 전체 · 확정본 v1.2',
+    sections:[{label:'요약', body:`
+    <div class="kpiRow" style="grid-template-columns:repeat(2,1fr);margin-bottom:16px">
       ${(isRes?[['전기 사용','96.4','kWh','전월 −4.2%','ok'],['평균 실내온도','26.8','°C','쾌적 82%','info'],
                 ['민원 접수','2','건','평균 처리 1.4일','info'],['절감 실적','12,400','원','동일 평형 대비','ok']]
               :[['민원 접수','32','건','전월 −5건','ok'],['알람 발생','118','건','전월 +12건','warn'],
@@ -984,10 +989,11 @@ export function openReport(){
     </tbody></table>
     <div class="empty" style="text-align:left;margin-top:12px;font-size:11px">
       원천 데이터가 미수집된 섹션은 <b>"데이터 불충분"</b>으로 표시하고 리포트 생성은 진행합니다.
-      확정 후 원천 데이터가 정정되면 <b>개정판</b>으로 재발행됩니다.</div>`}`,
-    `<button class="btn" onclick="closeAll()">닫기</button>
-     ${!isRes?`<button class="btn pri" onclick="closeAll();toast('7월 리포트를 확정했습니다 · v1.2 → 확정본 보존')">리포트 확정</button>`:''}`,660);
+      확정 후 원천 데이터가 정정되면 <b>개정판</b>으로 재발행됩니다.</div>`}`}],
+    actions:[ !isRes&&{label:'리포트 확정',kind:'primary',
+      fn:()=>{clearDetail();toast('7월 리포트를 확정했습니다 · v1.2 → 확정본 보존');}} ],
+  });
 }
 
 /* 인라인 핸들러가 참조하는 심볼을 window 에 등록 (동작 유지) */
-Object.assign(window,{pgHome,setPlanTab,setPlanMode,renderPlanLegend,tgSenior,tgAway,renderMyReq,roomPaint,renderPlan,selectRoom,backToSummary,backToSpace,selectSensor,renderRight,summaryPanel,setOutletTab,spacePanel,toggleSpacePower,sensorPanel,setPeriod,toggleSensor,openDevice,devSet,devStop,devPower,pgRoadmap,pgMaterial,pgPipe,tgPipe,renderPipe,pgEnvpred,pgNeighbor,pgEnergyRes,pgScenario,applyScenario,pgLifespan,pgHistory,pgRemodel,pgTransfer,genTransfer,pgRequest,pgReqstat,renderReqForm,renderReqPlan,submitReq,openMyReq,rateReq,reopenReq,openReport});
+Object.assign(window,{pgHome,setPlanTab,setPlanMode,renderPlanLegend,tgSenior,tgAway,renderMyReq,roomPaint,renderPlan,selectRoom,backToSummary,backToSpace,selectSensor,renderRight,summaryPanel,setOutletTab,spacePanel,toggleSpacePower,sensorPanel,setPeriod,toggleSensor,deviceControl,devSet,devStop,devPower,pgRoadmap,pgMaterial,pgPipe,tgPipe,renderPipe,pgEnvpred,pgNeighbor,pgEnergyRes,pgScenario,applyScenario,pgLifespan,pgHistory,pgRemodel,pgTransfer,genTransfer,pgRequest,pgReqstat,renderReqForm,renderReqPlan,submitReq,openMyReq,rateReq,reopenReq,openReport});
