@@ -24,6 +24,8 @@ export const state={
            layers:{frame:true, door:true, fix:true, ceiling:false, jet:false, porch:false} },
   /* 공용 상세 패널 스택 (render/detail.js) — L3 상세는 전부 여기로 */
   detail:{ stack:[] },
+  /* 존 모델 CFD 근사 오버레이 (build_cfd.js 사전계산 · 계보 시뮬+가정) */
+  cfd:{ caseId:'', data:null, loading:false, sliceY:1.1 },
   /* 작업 지시 생성 (FR-MNT-02) */
   woDraft:{},
   /* 민원 접수 폼 (페이지 내 인라인 · FR-CSM-01) */

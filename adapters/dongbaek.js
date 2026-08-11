@@ -17,7 +17,7 @@ export const SPACE_MAP = {
 };
 
 /* 실측 출처 세대 — srcUnit 에 기록되는 계보 표기용 */
-const SRC_UNIT = '동백래미안 1동 202호';
+const SRC_UNIT = '동백 동 호';
 
 /* 데모 기준 시각 (v0.7 NOW 와 동일 · 고정) */
 const DEMO_TS = '2026-08-07T17:43:00+09:00';

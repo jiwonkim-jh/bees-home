@@ -13,7 +13,12 @@ http.createServer((req,res)=>{
   if(!file.startsWith(ROOT)){res.writeHead(403);return res.end('403');}
   fs.readFile(file,(err,buf)=>{
     if(err){res.writeHead(404);return res.end('404 '+p);}
-    res.writeHead(200,{'Content-Type':(MIME[path.extname(file)]||'application/octet-stream')+'; charset=utf-8'});
+    /* 캐시 금지 — ES 모듈은 브라우저가 파일별로 캐시해서, 코드를 고쳐도
+       새로 고침만으로는 반영되지 않는 일이 생긴다. 개발용 서버이므로 항상 새로 받는다. */
+    res.writeHead(200,{
+      'Content-Type':(MIME[path.extname(file)]||'application/octet-stream')+'; charset=utf-8',
+      'Cache-Control':'no-store, no-cache, must-revalidate',
+      'Pragma':'no-cache','Expires':'0'});
     res.end(buf);
   });
 }).listen(PORT,()=>console.log('BEES Home v0.9  →  http://localhost:'+PORT));

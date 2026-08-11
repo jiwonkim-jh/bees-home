@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>BEES HOME · 모듈러 주택 단지 운영 디지털트윈 v0.9</title>
+<title>BEES HOME · 모듈러 주택 단지 운영 디지털트윈 v0.9.1</title>
 <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"/>
 <style>
 :root{
@@ -176,6 +176,9 @@ button{cursor:pointer}
 .srcb.calc{border-color:var(--blue-line);color:var(--blue);background:var(--blue-soft)}
 .srcb.pred{border-color:#f5dcae;color:var(--warn);background:var(--warn-soft)}
 .srcb.demo{border-color:#d8d0f7;color:var(--purple);background:var(--purple-soft)}
+/* 계보 : 시뮬(CFD 사전계산) · 가정(출처 미확인 상수) */
+.srcb.sim{border-color:#bcd9fb;color:#0f6ab4;background:#eaf4ff}
+.srcb.assume{border-color:#e6c9a8;color:#a4600f;background:#fdf3e6}
 
 /* ══════════ 입주민 화면 ══════════ */
 .resWrap{display:grid;grid-template-columns:326px 1fr 384px;gap:12px;padding:12px;overflow:hidden;height:100%}
@@ -262,6 +265,21 @@ button{cursor:pointer}
 .s3btn{border:1px solid var(--line);background:#fff;border-radius:14px;padding:3px 9px;font-size:10.5px;
   font-weight:700;color:var(--ink2);cursor:pointer}
 .s3btn:hover{border-color:var(--blue-line);color:var(--blue)}
+/* ── CFD 근사 오버레이 (계보 시뮬 + 가정) ── */
+.s3cfdSel{align-items:center;gap:7px!important}
+.s3cfdSel select{font-size:10.5px;font-weight:700;color:var(--ink2);border:1px solid var(--line);
+  border-radius:13px;padding:3px 7px;background:#fff;max-width:190px}
+.s3lab{font-size:10px;font-weight:700;color:var(--muted);display:flex;align-items:center;gap:4px}
+.scene3d .s3cfd{stroke:#ffffff40;stroke-width:.3;pointer-events:none}
+.cfdLegend{position:absolute;left:10px;right:10px;bottom:44px;display:flex;align-items:center;gap:9px;
+  flex-wrap:wrap;background:#0f2340f2;color:#fff;padding:7px 12px;border-radius:12px;
+  font-size:10.5px;box-shadow:var(--shadow-m)}
+.cfdLegend.hidden{display:none}
+.cfdLegend .cfdT{font-weight:800}
+.cfdLegend .cfdBar{display:inline-flex;border-radius:4px;overflow:hidden;border:1px solid #ffffff40}
+.cfdLegend .cfdBar i{width:22px;height:9px;display:block}
+.cfdLegend .cfdSc{color:#ffffffb0;font-variant-numeric:tabular-nums}
+.cfdLegend .cfdMeta{color:#ffffff9c;flex:1;min-width:180px}
 .viewSeg{margin-right:4px}
 .roomShell{fill:#e6ebf1}
 .roomG{cursor:pointer}
@@ -795,7 +813,7 @@ table.tbl td.str{font-weight:700;color:var(--ink)}
         <div class="bmsg" id="bmsg">모듈 초기화 중…</div>
       </div>
       <div class="bootfoot">
-        <span>v0.9.0</span><span>PRD v1.0 · FRD v1.0 기준</span><span id="bootStat">Ready</span>
+        <span>v0.9.1 · CFD</span><span>PRD v1.0 · FRD v1.0 기준</span><span id="bootStat">Ready</span>
       </div>
     </div>
   </div>
@@ -868,8 +886,6 @@ table.tbl td.str{font-weight:700;color:var(--ink)}
 <script type="module">
 /* ══════════════════════════════════════════════════════════════════
    BEES HOME v0.9 · 부팅 — ES 모듈 로드 후 초기 렌더
-   v0.8 단일 파일을 9개 모듈로 분할했다. 로직은 그대로다.
-   file:// 로 열면 모듈 import 가 CORS 로 차단된다 — 로컬 서버로 열 것.
    ══════════════════════════════════════════════════════════════════ */
 import {$,COMPLEX,MODULE_TYPES} from './data/module.js';
 import {state} from './data/state.js';

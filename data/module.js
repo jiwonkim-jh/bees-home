@@ -6,10 +6,7 @@ import {DEVICES,MODULE,SPACES} from './moduleUnit.js';
 export {MODULE,SPACES,DEVICES};
 
 /* ══════════════════════════════════════════════════════════════════
-   BEES HOME · 모듈러 주택 단지 운영 디지털트윈 데모 v0.6
-   기준 : 260708 FRD v1.0 / 스마트홈_주택_센서정보_필드_260807
           BEES_Home_기능요구사항체크(데모기준)_260807
-   데이터: 시드 고정 의사난수 — 새로고침해도 동일. BMS·DCIM 연계 자리
    ══════════════════════════════════════════════════════════════════ */
 export const $=id=>document.getElementById(id);
 

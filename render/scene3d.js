@@ -8,6 +8,7 @@ import {state} from '../data/state.js';
 import {GEO,GEO_ZONES} from '../data/geometry3d.js';
 import {$,fx,spaceOf,devicesOf,aqiOf,SPACES} from '../data/module.js';
 import {GRADE_E,GRADE_C,GRADE_A,gradeOf} from '../data/const.js';
+import {CFD_CASES,caseId,caseLabel} from '../data/cfdConstants.js';
 
 /* ── 모델 범위 · 카메라 기본값 ── */
 const B=(()=>{const b={x0:1e9,x1:-1e9,y0:1e9,y1:-1e9,z0:1e9,z1:-1e9};
@@ -130,15 +131,65 @@ export function render3D(){
       <text x="${lp[0].toFixed(1)}" y="${(lp[1]+13).toFixed(1)}" text-anchor="middle" class="s3v">${zoneLabel(sp)}</text></g>`});
   });
 
+  /* 2-b) CFD 근사 슬라이스 (선택된 케이스가 있을 때만) */
+  const CASE=cfdSliceItems(P,items);
+
   /* 3) 계층 우선 · 계층 안에서는 화가 알고리즘(먼 것부터) */
   items.sort((a,b)=>a.tier-b.tier || b.dep-a.dep);
   sv.innerHTML=items.map(i=>i.svg).join('');
+  cfdLegend(CASE);
   bindDrag(sv);
   const tip=$('planTip');
   if(tip)tip.textContent = state.selRoom
     ? `${spaceOf(state.selRoom).nm} 선택됨 — 좌클릭 선택 · 우클릭 드래그 회전 · 휠 줌 · 가운데 드래그 이동`
     : '좌클릭 선택 · 우클릭 드래그 회전 · 휠 줌 · 가운데 드래그 이동';
   const bar=$('s3dBar'); if(bar)bar.innerHTML=barHtml();
+}
+
+/* ══════════ 존 모델 CFD 근사 오버레이 ══════════════════════════════
+   build_cfd.js 가 만든 data/cfdCases.json 의 격자를 1.1m 수평 슬라이스로
+   반투명 색 사각형 배열로 표시한다. 레이마칭이 아니라 단순 색 격자다.
+   전 수치는 가정 상수 기반 — 계보 「시뮬」 + 「가정」.                */
+const CFD_SCALE={min:24,max:44};                 // 색상 고정 범위 (케이스 비교용)
+/* state.js 가 낡은 캐시로 로드돼 state.cfd 가 없어도 조작바가 깨지지 않게 한다 */
+function cfdState(){
+  if(!state.cfd)state.cfd={caseId:'',data:null,loading:false,sliceY:1.1};
+  return state.cfd;
+}
+function cfdColor(t){
+  const u=Math.max(0,Math.min(1,(t-CFD_SCALE.min)/(CFD_SCALE.max-CFD_SCALE.min)));
+  const stops=[[0,[43,108,214]],[0.35,[15,155,155]],[0.6,[224,138,18]],[1,[214,69,69]]];
+  let a=stops[0],b=stops[stops.length-1];
+  for(let i=0;i<stops.length-1;i++) if(u>=stops[i][0]&&u<=stops[i+1][0]){a=stops[i];b=stops[i+1];break;}
+  const f=(u-a[0])/((b[0]-a[0])||1);
+  const c=a[1].map((v,i)=>Math.round(v+(b[1][i]-v)*f));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+export async function selectCfdCase(id){
+  const st=cfdState(); st.caseId=id||'';
+  if(!id){render3D();return;}
+  if(!state.cfd.data&&!state.cfd.loading){
+    state.cfd.loading=true; render3D();
+    try{ state.cfd.data=await (await fetch('./data/cfdCases.json')).json(); }
+    catch(e){ state.cfd.caseId=''; }
+    state.cfd.loading=false;
+  }
+  render3D();
+}
+/* 선택된 케이스의 1.1m 슬라이스를 items 에 넣는다 */
+function cfdSliceItems(P,items){
+  const c=cfdState(); if(!c.caseId||!c.data)return null;
+  const CASE=c.data[c.caseId]; if(!CASE)return null;
+  const g=(CASE.grid&&CASE.grid[0])||0.5, h=g/2;
+  const y=c.sliceY;
+  CASE.cells.filter(cell=>Math.abs(cell.y-y)<0.01).forEach(cell=>{
+    const q=[[cell.x-h,y,cell.z-h],[cell.x+h,y,cell.z-h],[cell.x+h,y,cell.z+h],[cell.x-h,y,cell.z+h]];
+    const R=q.map(P.rot), pts=R.map(P.to2);
+    const dep=R.reduce((a,r)=>a+r[2],0)/R.length;
+    items.push({tier:1.5,dep,svg:`<polygon class="s3cfd" points="${pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}"
+      fill="${cfdColor(cell.temp)}" fill-opacity="0.5"><title>${cell.temp.toFixed(1)}℃ (시뮬·가정)</title></polygon>`});
+  });
+  return CASE;
 }
 
 /* 색 밝기 조절 (#rrggbb × 계수) */
@@ -148,13 +199,36 @@ function shade(hex,k){
   return '#'+((r<<16)|(g<<8)|b).toString(16).padStart(6,'0');
 }
 
+/* CFD 범례 — 케이스 정보 · 색 스케일 · 계보 배지 */
+function cfdLegend(CASE){
+  const el=$('cfdLegend'); if(!el)return;
+  if(!CASE){el.classList.add('hidden');el.innerHTML='';return;}
+  const m=CASE.meta, steps=[24,28,32,36,40,44];
+  el.innerHTML=`<span class="cfdT">${m.label}</span>
+    <span class="srcb sim">시뮬</span><span class="srcb assume">가정</span>
+    <span class="cfdBar">${steps.map(t=>`<i style="background:${cfdColor(t)}" title="${t}℃"></i>`).join('')}</span>
+    <span class="cfdSc">${CFD_SCALE.min}℃</span><span class="cfdSc">${CFD_SCALE.max}℃</span>
+    <span class="cfdMeta">1.1m 슬라이스 · 격자 ${(CASE.grid&&CASE.grid[0])||0.5}m ·
+      공간 평균 ${Object.entries(m.zoneMean).map(([k,v])=>v+'℃').join(' / ')} ·
+      반복 ${m.iterations}회</span>`;
+  el.classList.remove('hidden');
+}
+
 /* ── 레이어 · 시점 조작 바 ── */
 const LAYERS=[['frame','창호'],['door','문'],['fix','붙박이장'],['ceiling','천장'],['jet','냉기 흐름'],['porch','현관 포치']];
 function barHtml(){
-  const v=state.view3d;
+  const v=state.view3d, c=cfdState();
+  const opts=CFD_CASES.map(x=>{const id=caseId(x);
+    return `<option value="${id}" ${c.caseId===id?'selected':''}>${caseLabel(x)}</option>`;}).join('');
   return `<div class="s3grp">${LAYERS.map(([k,nm])=>
     `<button class="lchip ${v.layers[k]?'on':''}" onclick="toggle3DLayer('${k}')">${nm}</button>`).join('')}
     <button class="lchip ${v.cutaway?'on':''}" onclick="toggle3DCut()">단면 보기</button></div>
+   <div class="s3grp s3cfdSel">
+     <span class="s3lab">CFD 근사 <span class="srcb sim">시뮬</span><span class="srcb assume">가정</span></span>
+     <select onchange="selectCfdCase(this.value)">
+       <option value="">표시 안 함</option>${opts}</select>
+     ${c.loading?'<span class="s3lab">불러오는 중…</span>':''}
+     <span class="s3lab" title="이 표시가 보이면 최신 scene3d.js 가 로드된 것">3D v0.9.1</span></div>
    <div class="s3grp">${[['-30','↺'],['30','↻']].map(([d,i])=>
     `<button class="s3btn" onclick="spin3D(${d})">${i}</button>`).join('')}
     <button class="s3btn" onclick="zoom3D(1.2)">＋</button>

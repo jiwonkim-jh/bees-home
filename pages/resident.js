@@ -7,9 +7,9 @@ import {state} from '../data/state.js';
 import {gaugeArc,svgArea,svgBars,svgMulti} from '../render/chart.js';
 import {closeAll,dlgOpen,pgHead,renderPage,renderSideNav,toast} from '../render/shell.js';
 import {openDetail,popDetail,clearDetail} from '../render/detail.js';
-import {render3D,toggle3DLayer,toggle3DCut,spin3D,zoom3D,reset3D} from '../render/scene3d.js';
+import {render3D,toggle3DLayer,toggle3DCut,spin3D,zoom3D,reset3D,selectCfdCase} from '../render/scene3d.js';
 /* 3D 뷰의 인라인 핸들러도 window 에 등록한다 (2D 와 같은 방식) */
-Object.assign(window,{render3D,toggle3DLayer,toggle3DCut,spin3D,zoom3D,reset3D});
+Object.assign(window,{render3D,toggle3DLayer,toggle3DCut,spin3D,zoom3D,reset3D,selectCfdCase});
 
 export function pgHome(){
   const items=NOTI.resident.filter(n=>n.k==='w'||n.k==='r');
@@ -78,7 +78,8 @@ export function pgHome(){
           <div class="planTip ${state.planMode==='3d'?'low':''}" id="planTip">공간을 클릭하면 우측에 상세가 표시됩니다</div>
           ${state.planMode==='3d'
             ? `<svg id="scene3d" class="scene3d" viewBox="0 0 520 430" preserveAspectRatio="xMidYMid meet"></svg>
-               <div class="s3dBar" id="s3dBar"></div>`
+               <div class="s3dBar" id="s3dBar"></div>
+               <div class="cfdLegend hidden" id="cfdLegend"></div>`
             : `<svg id="planSvg" viewBox="0 0 520 430" preserveAspectRatio="xMidYMid meet"></svg>`}
           <div class="planLegend" id="planLegend"></div>
         </div>
