@@ -698,7 +698,8 @@ export function pgEnergy8(){
         <tr><td class="str">실내 습도</td><td class="n">52 %</td><td>40 ~ 60 %</td><td><span class="pill ok">양호</span></td></tr>
         <tr><td class="str">CO₂</td><td class="n">784 ppm</td><td>≤ 800 ppm</td><td><span class="pill ok">양호</span></td></tr>
         <tr><td class="str">PM2.5</td><td class="n">6.2 ㎍/㎥</td><td>≤ 35 ㎍/㎥</td><td><span class="pill ok">양호</span></td></tr>
-        <tr><td class="str">TVOC</td><td class="n">128 ppb</td><td>≤ 400 ppb</td><td><span class="pill ok">양호</span></td></tr>
+        <!-- TVOC 는 단위 미확정 (SED TEL 6) — 숫자를 쓰지 않고 등급만 표기한다 -->
+        <tr><td class="str">TVOC</td><td class="n">좋음</td><td>단위 확정 대기</td><td><span class="pill ok">양호</span></td></tr>
         <tr><td class="str">누수 감지</td><td class="n">1 건</td><td>0 건</td><td><span class="pill danger">긴급</span></td></tr>
       </tbody></table></div>
     <div class="card"><div class="ch"><span class="ct"><span class="ci">🗺</span>위험 구역</span><span class="cx">FR-ENG-04</span></div>
@@ -796,12 +797,18 @@ export function pgRec(){
         <div class="recCard ${r.st}">
           <div class="recHead"><span class="rn4">${r.nm}</span>
             <span style="display:flex;gap:6px;align-items:center">
-              <span class="pill ${r.type==='운전'?'info':r.type==='정비'?'purple':'mute'}">${r.type}</span>
+              <span class="pill ${r.type==='운전'?'info':r.type==='정비'?'purple':r.type==='설계'?'warn':'mute'}">${r.type}</span>
+              ${/* 설계 권고는 공장 생산 사양 변경이라 반영 시점을 함께 못박는다 */''}
+              ${r.target?`<span class="pill ${r.target==='즉시 반영'?'ok':'warn'}">${r.target}</span>`:''}
               <span class="pill ${r.st==='approved'?'ok':r.st==='rejected'?'mute':'warn'}">${r.st==='approved'?'승인':r.st==='rejected'?'반려':'검토 대기'}</span></span></div>
           <div class="recBody">${r.body}</div>
           <div class="recEff">${r.eff.map(e=>`<div><div class="rel">${e.l}</div><div class="rev">${e.v}</div></div>`).join('')}</div>
           <div style="font-size:10.5px;color:var(--muted);margin-bottom:7px;line-height:1.6">
             <b style="color:var(--ink2)">근거</b> · ${r.basis.join(' / ')}<br>
+            ${r.cfdCase||r.moduleType?`<b style="color:var(--ink2)">근거 추적</b> ·
+              ${r.cfdCase?`CFD 케이스 <b style="font-family:monospace">${r.cfdCase}</b>`:''}
+              ${r.cfdCase&&r.moduleType?' · ':''}
+              ${r.moduleType?`대상 타입 <b>${typeNmOf(r.moduleType)}</b> <span style="font-family:monospace">${r.moduleType}</span>`:''}<br>`:''}
             <b style="color:var(--warn)">부작용 가능성</b> · ${r.side}</div>
           ${r.applied?`<div class="empty" style="text-align:left;border-color:#b7e6d0;background:var(--ok-soft);margin-bottom:8px;font-size:10.5px">
             <b style="color:var(--ok)">반영 완료</b> · ${r.applied}</div>`:''}
@@ -817,13 +824,14 @@ export function pgRec(){
         <div class="cb">${RISKS.map(k=>`
           <div style="border:1px solid var(--line);border-radius:var(--r-m);padding:11px 12px;margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-              <span style="font-size:12.5px;font-weight:800">${k.nm}</span>
+              <span style="font-size:12.5px;font-weight:800">${k.nm} <span class="srcb calcwait">산출 예정</span></span>
               <span class="pill" style="background:${k.c}1a;color:${k.c};border-color:${k.c}4d">${k.grade}</span></div>
             <div style="display:flex;align-items:center;gap:9px;margin:8px 0">
               <span class="bar" style="flex:1"><i style="width:${k.score}%;background:${k.c}"></i></span>
               <span class="num" style="font-size:13px;font-weight:800;color:${k.c}">${k.score}</span></div>
             <div style="font-size:11px;color:var(--muted);line-height:1.6">${k.sp} · ${k.why}</div>
-            <div style="font-size:11px;color:var(--ink2);margin-top:5px"><b>권고</b> ${k.rec}</div></div>`).join('')}</div></div>
+            <div style="font-size:11px;color:var(--ink2);margin-top:5px"><b>권고</b> ${k.rec}</div></div>`).join('')}
+          <div class="srcNote">온도·습도 계측값 기반, 계산식은 확정 대기</div></div></div>
       <div class="card"><div class="ch"><span class="ct"><span class="ci">🛡</span>제어 가드레일</span><span class="cx">FR-SIM-10</span></div>
         <div class="cb">
           <div class="kv"><span class="k">실내 온도 허용</span><span class="v num">22 ~ 26 ℃</span></div>
@@ -851,6 +859,9 @@ export function recSet(id,st){
       r.applied=`작업 지시 <b>${wid}</b> 생성 · 점검 주기 정책 갱신`;
     }else if(r.type==='운전'){
       r.applied='설비 제어 정책 갱신 · 08-09 12:00 선제 운전 예약';
+    }else if(r.type==='설계'){
+      /* 설계 권고는 작업 지시를 만들지 않는다 — 생산 사양 변경 요청으로 넘어간다 */
+      r.applied=`<b>${typeNmOf(r.moduleType)}</b> 생산 사양 변경 요청 등록 · 반영 시점 <b>${r.target}</b> · 근거 <b>${r.cfdCase}</b>`;
     }else{
       r.applied='입주민 공지 예약 · 대상 5세대 · 08-09 09:00 발송';
     }

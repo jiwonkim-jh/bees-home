@@ -75,6 +75,8 @@ GEO_ZONES.forEach(Z=>{
     ventUA:vol*A.infiltrationACH/3600*RHO_CP};
 });
 
+const TOTAL_VOL=Object.values(zoneInfo).reduce((a,z)=>a+z.vol,0);   // MVHR 배분용
+
 /* ── 3. 케이스별 계산 ── */
 const nearestCell=(sp,p)=>{
   let best=-1,bd=1e9;
@@ -96,8 +98,23 @@ const DEVPOS=(()=>{
   Object.entries(acc).forEach(([k,a])=>o[k]={x:a.x/a.n,y:a.y/a.n,z:a.z/a.n});
   return o;
 })();
-console.log('OBJ 실측 기기 위치 '+Object.keys(DEVPOS).length+'개 사용: '
-  +Object.entries(DEVPOS).map(([k,p])=>`${k}(${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)})`).join(' '));
+/* 급기 그릴 위치 — OBJ 'jet'(냉기 흐름) 레이어 면 중심을 공간별로 모은다 */
+const JETPOS=(()=>{
+  const acc={};
+  GEO.filter(f=>f.l==='jet'&&f.sp).forEach(f=>{
+    const a=acc[f.sp]=acc[f.sp]||{x:0,y:0,z:0,n:0};
+    f.p.forEach(p=>{a.x+=p[0];a.y+=p[1];a.z+=p[2];a.n++;});
+  });
+  const o={};
+  Object.entries(acc).forEach(([k,a])=>o[k]={x:a.x/a.n,y:a.y/a.n,z:a.z/a.n});
+  return o;
+})();
+/* DEVICES 에 실제로 있는 기기만 로그로 남긴다 (제거된 기기 OBJ 면은 무시) */
+const usedDev=Object.keys(DEVPOS).filter(k=>DEVICES.some(d=>d.id===k));
+console.log('OBJ 실측 기기 위치 '+usedDev.length+'개 사용: '
+  +usedDev.map(k=>{const p=DEVPOS[k];return `${k}(${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)})`;}).join(' '));
+console.log('급기 그릴(jet) '+Object.keys(JETPOS).length+'개소: '
+  +Object.entries(JETPOS).map(([k,p])=>`${k}(${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)})`).join(' '));
 
 const out={};
 CFD_CASES.forEach(CS=>{
@@ -151,25 +168,34 @@ CFD_CASES.forEach(CS=>{
     const tgt=peri.length?peri:list;
     tgt.forEach(i=>UA[i]+=zi.UA/tgt.length);
     /* 침기(0.5 ACH) + 국소 배기(후드·환기팬, 자재 명세 실측 풍량)
-       + 냉방 OFF 케이스는 창 개방 자연환기를 더한다 (가정) */
+       + MVHR 열회수 급기 + 냉방 OFF 케이스의 창 개방 자연환기(가정)
+       MVHR 은 열회수 효율만큼 손실이 줄어든다 → (1 − eff) 만 부하로 계산 (수정 7) */
     const exh=(A.exhaustM3h||{})[Z.id]||0;
     const exhUA=exh/3600*RHO_CP;
     const natUA=(CS.ac==='off')?zi.vol*A.naturalVentACH_acOff/3600*RHO_CP:0;
-    list.forEach(i=>UA[i]+=(zi.ventUA+exhUA+natUA)/list.length);
+    const mvhrShare=zi.vol/TOTAL_VOL;                       // 체적 비례 배분
+    const mvhrUA=(A.mvhrM3h||0)*mvhrShare/3600*RHO_CP*(1-(A.mvhrRecoveryEff||0));
+    list.forEach(i=>UA[i]+=(zi.ventUA+exhUA+natUA+mvhrUA)/list.length);
   });
 
   /* 3-e 에어컨 냉방 — 설정온도(§8 재실 냉방 상한) 초과분만 정격 한도 내에서 제거.
          정격을 고정 흡열로 넣으면 과냉각(영하)이 나오므로 반복 안에서 계산한다. */
+  /* 중앙 히트펌프 1대가 servedSpaces 를 나눠 담당한다 (수정 7).
+     정격은 현열 기준으로 쓰고, 담당 공간 중 실제 가동 중인 공간에만 배분한다. */
+  const HP=A.centralHeatPump;
   const acCells={};
-  A.acUnits.forEach(u=>{
-    if(!acOn[u.space])return;
-    const dev=DEVICES.find(d=>d.space===u.space&&d.thermal.mode==='sink');
-    const pos=(dev&&DEVPOS[dev.id])||(dev?dev.thermal.pos:null)||{x:(zoneInfo[u.space].x0+zoneInfo[u.space].x1)/2,y:2.0,
-                                   z:(zoneInfo[u.space].z0+zoneInfo[u.space].z1)/2};
-    const list=zoneCells[u.space].filter(i=>{const c=cells[i];
+  const served=HP.servedSpaces.filter(sp=>acOn[sp]);
+  served.forEach(sp=>{
+    /* 덕트 공조라 실내기가 없다 (v0.4 2매). 냉기는 급기 그릴에서 나오므로
+       OBJ 의 'jet'(냉기 흐름) 면 중심을 급기점으로 쓴다.
+       그것도 없으면 존 중심으로 폴백한다.                                */
+    const pos=JETPOS[sp]||{x:(zoneInfo[sp].x0+zoneInfo[sp].x1)/2,y:2.0,
+                           z:(zoneInfo[sp].z0+zoneInfo[sp].z1)/2};
+    const list=zoneCells[sp].filter(i=>{const c=cells[i];
       return (c.x-pos.x)**2+(c.y-pos.y)**2+(c.z-pos.z)**2 <= 2.0**2;});
-    acCells[u.space]={cells:list.length?list:zoneCells[u.space], capW:u.capacityKw*1000,
-      zone:zoneCells[u.space]};
+    acCells[sp]={cells:list.length?list:zoneCells[sp],
+      capW:HP.sensibleKw*1000/served.length,          // 현열 정격을 가동 공간 수로 분할
+      zone:zoneCells[sp]};
   });
 
   /* 3-f 가우스-자이델 이완 반복 */

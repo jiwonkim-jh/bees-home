@@ -6,7 +6,10 @@ import {DEVICES,MODULE,SPACES} from './moduleUnit.js';
 export {MODULE,SPACES,DEVICES};
 
 /* ══════════════════════════════════════════════════════════════════
+   BEES HOME · 모듈러 주택 단지 운영 디지털트윈 데모 v0.6
+   기준 : 260708 FRD v1.0 / 스마트홈_주택_센서정보_필드_260807
           BEES_Home_기능요구사항체크(데모기준)_260807
+   데이터: 시드 고정 의사난수 — 새로고침해도 동일. BMS·DCIM 연계 자리
    ══════════════════════════════════════════════════════════════════ */
 export const $=id=>document.getElementById(id);
 
@@ -47,8 +50,9 @@ export const ENVSYS={ outTemp:34.0, pm10:8, pm10Grade:'좋음', unit:MODULE.id,
 /* units 는 MODULE_TYPES 합계로 덮어쓴다 (공간 계층 블록 참조) */
 export const COMPLEX={ id:'CX-BEES', nm:'BEES 모듈러 단지', addr:'—', units:0 };
 
+/* occupancy 는 상수로 두지 않는다 — 재실감지 실측값이므로 occupancyOf() 로 읽는다 */
 export const MYUNIT={ id:MODULE.id, no:MODULE.serial, nm:MODULE_NM,
-  area:MODULE_AREA, household:MODULE.household, movedIn:MODULE.installedAt, occupancy:'재실 중' };
+  area:MODULE_AREA, household:MODULE.household, movedIn:MODULE.installedAt };
 
 /* ── 공간 계층 : 단지 > 모듈 타입 > 개체 ──
    모듈러 단지에는 동·층이 없다. 타입 아래 개체가 평면으로 놓인다.
@@ -86,6 +90,50 @@ export const plX=v=>PLAN.ox+v*PLAN.sc, plY=v=>PLAN.oy+v*PLAN.sc, plL=v=>v*PLAN.s
 export const planShell=()=>`<rect class="roomShell" x="${plX(0)}" y="${plY(0)}"
   width="${plL(MODULE.bbox.w*10)}" height="${plL(MODULE.bbox.d*10)}" rx="4"/>`;
 
+/* ══════════ 전기 요금 (한국 주택용 저압) — 규칙 §8 도메인 상수 ══════════
+   임의 단가(예: 720원/kWh)를 쓰지 않는다. 금액은 전부 이 엔진을 거친다.     */
+export const RATE={
+  base:    [910, 1600, 7300],       // 단계별 기본요금 (원)
+  energy:  [120.0, 214.6, 307.3],   // 단계별 전력량요금 (원/kWh)
+  climate: 9.0,                     // 기후환경요금 (원/kWh)
+  fuel:    5.0,                     // 연료비조정요금 (원/kWh)
+  vatRate: 0.10,                    // 부가가치세
+  fundRate:0.032,                   // 전력산업기반기금
+};
+/* 누진 구간은 계절에 따라 다르다 (규칙 §8)
+   하계 7~8월 : ~300 / 301~450 / 450 초과      기타 : ~200 / 201~400 / 400 초과 */
+export const TIER_LIMITS={ summer:[300,450,9999], other:[200,400,9999] };
+export const seasonOf=m=>(m===7||m===8)?'summer':'other';
+export const tiersOf=m=>TIER_LIMITS[seasonOf(m)].map((to,i)=>({n:i+1,to,won:RATE.energy[i]}));
+export const tierOf=(kwh,m)=>{
+  const lim=TIER_LIMITS[seasonOf(m)];
+  for(let i=0;i<lim.length;i++) if(kwh<=lim[i]) return i+1;
+  return lim.length;
+};
+/* 청구액 = (기본 + 전력량 + 기후환경 + 연료비조정) × (1 + vatRate + fundRate)
+   전력량요금은 단계별 누진으로 구간마다 해당 단가를 적용한다. */
+export function billOf(kwh,m){
+  const lim=TIER_LIMITS[seasonOf(m)];
+  let energy=0, n=1;
+  for(let i=0;i<lim.length;i++){
+    const prev=i?lim[i-1]:0;
+    const span=Math.max(0,Math.min(kwh,lim[i])-prev);
+    if(span>0){energy+=span*RATE.energy[i]; n=i+1;}
+  }
+  const base=RATE.base[n-1], climate=kwh*RATE.climate, fuel=kwh*RATE.fuel;
+  const sub=base+energy+climate+fuel;
+  return {kwh,tier:n,base,
+    energy:Math.round(energy), climate:Math.round(climate), fuel:Math.round(fuel),
+    sub:Math.round(sub), vat:Math.round(sub*RATE.vatRate), fund:Math.round(sub*RATE.fundRate),
+    total:Math.round(sub*(1+RATE.vatRate+RATE.fundRate)/10)*10};
+}
+/* 한계 단가 (원/kWh) — 절감 금액은 해당 세대의 누진 단계 단가로 계산한다 */
+export const marginalWon=(kwh,m)=>
+  (RATE.energy[tierOf(kwh,m)-1]+RATE.climate+RATE.fuel)*(1+RATE.vatRate+RATE.fundRate);
+
+/* 기존 TIERS 는 계절 무시 상수였다 → 하계/기타를 구분하는 tiersOf(월) 로 대체 */
+export const TIERS=tiersOf(8);
+
 /* 공간 아이콘 — 표시 전용 UI 상수 (스키마 아님) */
 export const SPACE_ICON={living:'🛋', kitchen:'🍳', bedroom:'🛏', bath:'🚿'};
 
@@ -98,8 +146,9 @@ export const STYPE={
   SEL:{nm:'SMART LIGHT',  k:'조명',   icon:'💡', ctrl:'dim'},
   SES:{nm:'SMART SWITCH', k:'스위치', icon:'🎚', ctrl:'onoff'},
   SEC:{nm:'SMART BLIND',  k:'전동커튼',icon:'🪟', ctrl:'blind'},
-  SEA:{nm:'AIR SENSOR',   k:'환경센서',icon:'🌡', ctrl:'none'},
 };
+/* 환경 측정은 별도 기기가 아니라 SEL(온습도·재실) / SES(공기질) 의 부가 항목이다.
+   SED 전문의 Category 도 전등 L / 스위치 S / 콘센트 P 세 종류뿐이다.        */
 
 /* 공간 소속 기기 조회 — v0.7 공간별 센서 맵을 대체 */
 export const devicesOf=sid=>DEVICES.filter(d=>d.space===sid);
@@ -116,8 +165,10 @@ export const DEV_CTRL_INIT={SEL_6:70, SEL_12:100, SEC_1:50};
    TVOC(기준 400ppb) 부지수 중 최댓값. 임의 상수 없이 기준값에서만 파생한다. */
 export const CAI_PM25=[[0,15,0,50],[15,35,51,100],[35,75,101,250],[75,500,251,500]];
 
+/* 공기질 측정원(SES)이 없는 공간은 지수를 만들지 않는다 → null (센서 없음) */
 export function aqiOf(sp){
   const e=sp.env;
+  if(e.pm25==null||e.co2==null||e.tvoc==null) return null;
   const b=CAI_PM25.find(r=>e.pm25<=r[1])||CAI_PM25[CAI_PM25.length-1];
   const iPm=b[2]+(e.pm25-b[0])/(b[1]-b[0])*(b[3]-b[2]);
   const iCo2=(e.co2-400)/6;            // 400ppm(외기) → 0 · 1000ppm(실내 기준) → 100
@@ -125,22 +176,40 @@ export function aqiOf(sp){
   return Math.max(0,Math.round(Math.max(iPm,iCo2,iTvoc)));
 }
 
+/* TVOC 등급 — 단위(ppb/mg㎥/index)가 미확정이라 숫자를 화면에 쓰지 않는다.
+   등급 텍스트만 사용한다 (SED 전문 TEL 6 · 단위 tbd).                     */
+export const TVOC_GRADE=[{k:'좋음',c:'#1a9c6a',max:200},{k:'보통',c:'#e08a12',max:400},
+                         {k:'나쁨',c:'#d64545',max:Infinity}];
+export const tvocGradeOf=v=>v==null?{k:'센서 없음',c:'#96a1b0'}:TVOC_GRADE.find(g=>v<=g.max);
+
+/* 재실 상태 — 침실 SEL 의 재실감지(Radar · SED TEL 10 presence_state) 실측값.
+   Radar 보유 기기가 없으면 null 을 반환한다 (문자열을 만들지 않는다).      */
+export function occupancyOf(){
+  const d=DEVICES.find(x=>x.meas.occupied!=null);
+  return d?{on:d.meas.occupied, src:d.id, space:d.space}:null;
+}
+
 /* 센서 상세 실측값 (센서필드 §5.2)
-   난수 생성이 아니라 소속 공간 SPACES[].env 에서 파생한다.
-   같은 공간의 기기는 그 공간 env 를 기준으로 시드 고정 소폭 편차만 갖는다.   */
+   측정 기기 자신(SEL=온습도 · SES=공기질)은 실측을 그대로 쓴다.
+   같은 공간의 다른 기기는 공간 파생값에 시드 고정 소폭 편차만 갖는다.
+   측정원이 없는 항목은 null 을 그대로 흘려보낸다 — 화면이 '센서 없음' 처리. */
 export const seedOf=s=>String(s).split('').reduce((a,c)=>a+c.charCodeAt(0),0);
 
 export function sensorReading(sid){
   const d=deviceOf(sid), sp=(d&&spaceOf(d.space))||SPACES[0], e=sp.env;
+  const m=(d&&d.meas)||{}, oTh=m.temp!=null, oAq=m.co2!=null;
   const k=seedOf(sid);
   const dv=(n,r)=>(rnd(k+n)-0.5)*2*r;              // ±r 편차
   const rt=(n,r)=>1+dv(n,r);                       // ±r 비율 편차
+  const add=(v,own,n,r,p=1)=>v==null?null:+(own?v:v+dv(n,r)).toFixed(p);
+  const mul=(v,own,n,r,p=1)=>v==null?null:+(own?v:v*rt(n,r)).toFixed(p);
   return {
-    temp:+(e.temp+dv(1,0.4)).toFixed(1),   humi:+(e.humi+dv(3,2)).toFixed(1),
-    tempAvg:+(e.temp+dv(2,0.2)).toFixed(1),humiAvg:+(e.humi+dv(4,1)).toFixed(1),
-    tvoc:+(e.tvoc*rt(5,0.08)).toFixed(1),  tvocAvg:+(e.tvoc*rt(6,0.04)).toFixed(1),
-    co2:+(e.co2*rt(7,0.05)).toFixed(2),    co2Avg:Math.round(e.co2*rt(8,0.03)),
-    pm25:+(e.pm25*rt(9,0.08)).toFixed(2),  pm25Avg:+(e.pm25*rt(10,0.04)).toFixed(1),
+    hasTh:e.temp!=null, hasAq:e.co2!=null,
+    temp:add(e.temp,oTh,1,0.4),        humi:add(e.humi,oTh,3,2),
+    tempAvg:add(e.temp,oTh,2,0.2),     humiAvg:add(e.humi,oTh,4,1),
+    tvoc:mul(e.tvoc,oAq,5,0.08),       tvocAvg:mul(e.tvoc,oAq,6,0.04),
+    co2:mul(e.co2,oAq,7,0.05,2),       co2Avg:e.co2==null?null:Math.round(oAq?e.co2:e.co2*rt(8,0.03)),
+    pm25:mul(e.pm25,oAq,9,0.08,2),     pm25Avg:mul(e.pm25,oAq,10,0.04),
   };
 }
 
@@ -215,4 +284,4 @@ export const LIFESPAN=[
 ];
 
 /* 인라인 핸들러가 참조하는 심볼을 window 에 등록 (동작 유지) */
-Object.assign(window,{$,app,rnd,fx,won,clamp,NOW,NOWTXT,TIMETXT,MODULE_NM,MODULE_AREA,ENVSYS,COMPLEX,MYUNIT,MODULE_TYPES,typeNmOf,typeOfLoc,unitCode,UNIT_REF,COMMON,PLAN,plX,plY,plL,planShell,SPACE_ICON,iconOf,STYPE,devicesOf,deviceOf,spaceOf,DEV_CTRL_INIT,CAI_PM25,aqiOf,seedOf,sensorReading,UNITS,MATERIALS,PIPES,LIFESPAN});
+Object.assign(window,{$,app,rnd,fx,won,clamp,NOW,NOWTXT,TIMETXT,MODULE_NM,MODULE_AREA,ENVSYS,COMPLEX,MYUNIT,MODULE_TYPES,typeNmOf,typeOfLoc,unitCode,UNIT_REF,COMMON,PLAN,plX,plY,plL,planShell,SPACE_ICON,iconOf,STYPE,devicesOf,deviceOf,spaceOf,DEV_CTRL_INIT,CAI_PM25,aqiOf,TVOC_GRADE,tvocGradeOf,occupancyOf,seedOf,sensorReading,UNITS,MATERIALS,PIPES,LIFESPAN});

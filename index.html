@@ -176,9 +176,16 @@ button{cursor:pointer}
 .srcb.calc{border-color:var(--blue-line);color:var(--blue);background:var(--blue-soft)}
 .srcb.pred{border-color:#f5dcae;color:var(--warn);background:var(--warn-soft)}
 .srcb.demo{border-color:#d8d0f7;color:var(--purple);background:var(--purple-soft)}
-/* 계보 : 시뮬(CFD 사전계산) · 가정(출처 미확인 상수) */
+/* 계보 : 시뮬(CFD 사전계산) · 가정(출처 미확인 상수) · 산출 예정(계산식 확정 대기) */
 .srcb.sim{border-color:#bcd9fb;color:#0f6ab4;background:#eaf4ff}
 .srcb.assume{border-color:#e6c9a8;color:#a4600f;background:#fdf3e6}
+.srcb.calcwait{border-color:#cfd8e3;color:#5a6a7d;background:#f2f5f9;border-style:dashed}
+/* 측정원 미보유 — 그 공간에 SEL(온습도) 또는 SES(공기질) 기기가 없음 */
+.srcb.none{border-color:#d5dbe3;color:#8a95a3;background:#f7f9fb;border-style:dotted}
+/* 배지 2개 병기 (예: TVOC = 계측 + 가정) */
+.srcb+.srcb{margin-left:3px}
+/* 계보 근거 문구 — 값의 출처를 한 줄로 명시한다 */
+.srcNote{font-size:10px;color:var(--muted2);padding:7px 0 2px;border-top:1px solid #eef2f7;margin-top:8px}
 
 /* ══════════ 입주민 화면 ══════════ */
 .resWrap{display:grid;grid-template-columns:326px 1fr 384px;gap:12px;padding:12px;overflow:hidden;height:100%}
@@ -642,6 +649,54 @@ table.tbl td.str{font-weight:700;color:var(--ink)}
 .navItem.scopeout .nsc{color:var(--purple)}
 
 /* 입주민 대시보드 (용인동백 재현) — 셸 안에서 전체 높이 */
+/* ══════════ HM-15 에너지 시뮬레이터 ══════════ */
+.simGrid{display:grid;grid-template-columns:322px 1fr 1fr;gap:12px;align-items:start}
+@media(max-width:1400px){.simGrid{grid-template-columns:292px 1fr}}
+@media(max-width:1040px){.simGrid{grid-template-columns:1fr}}
+.simCol{display:flex;flex-direction:column;gap:12px;min-width:0}
+/* 입력 폼 */
+.simRow{display:flex;align-items:center;gap:8px;padding:6px 0}
+.simRow .srLbl{width:62px;flex:none;font-size:11.5px;font-weight:700;color:var(--muted)}
+.simRow .srIn{flex:1;min-width:0;display:flex;align-items:center;gap:7px}
+.simNum{width:62px;flex:none;font-family:inherit;font-size:13px;font-weight:700;color:var(--ink);
+  text-align:center;padding:6px 4px;border:1.5px solid var(--line);border-radius:var(--r-s);
+  background:#fff;font-variant-numeric:tabular-nums}
+.simNum.wide{width:100%;text-align:left;padding-left:9px;font-weight:600}
+.simNum:focus{outline:none;border-color:var(--blue)}
+.simRow .srU{flex:none;font-size:11px;color:var(--muted2);margin-left:-3px}
+.simRange{flex:1;min-width:0;accent-color:var(--blue);height:4px}
+.simErr{margin-top:8px;padding:8px 10px;border:1px solid #f0c4c4;background:var(--danger-soft);
+  border-radius:var(--r-s);font-size:11.5px;font-weight:600;color:#b03636;line-height:1.6}
+.simRunBtn{width:100%;margin-top:10px;padding:11px 0;font-size:13.5px;font-weight:800}
+.simHave{display:flex;flex-wrap:wrap;gap:5px}
+.shItem{font-size:10.5px;font-weight:700;color:var(--ink2);background:var(--panel2);
+  border:1px solid var(--line);border-radius:var(--r-s);padding:4px 7px;white-space:nowrap}
+.shItem.na{opacity:.6}
+.shItem small{font-weight:500;color:var(--muted2);margin-left:3px}
+table.simTbl th,table.simTbl td{padding:7px 8px}
+.simHero{display:flex;align-items:center;justify-content:space-between;margin-top:10px;
+  padding:12px 14px;border-radius:var(--r-m);border:1px solid}
+.simHero.ok{border-color:#b7e6d0;background:var(--ok-soft)}
+.simHero.bad{border-color:#f0c4c4;background:var(--danger-soft)}
+.simHero .shl{font-size:11.5px;font-weight:700;color:var(--muted)}
+.simHero .shv{font-size:26px;font-weight:800;font-variant-numeric:tabular-nums}
+.simHero.ok .shv{color:#1a9c6a}
+.simHero.bad .shv{color:#d64545}
+.simHero .shv small{font-size:14px;margin-left:1px}
+.simLegend{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:8px;
+  font-size:10.5px;color:var(--muted)}
+.simLegend span{display:flex;align-items:center;gap:4px}
+.simLegend .lgAx{margin-left:auto;color:var(--muted2)}
+.lgLine{display:inline-block;width:14px;height:2px;border-radius:1px}
+.lgLine.dash{background:none!important;border-top:2px dashed #96a1b0;height:0}
+.lgDot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.simScale{display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--muted2)}
+.simDelta{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:10px}
+.simDelta>div{display:flex;align-items:center;gap:6px;padding:6px 9px;background:var(--panel2);
+  border:1px solid var(--line);border-radius:var(--r-s);font-size:11px}
+.simDelta .sdN{font-weight:700;color:var(--ink2);min-width:26px}
+.simDelta .sdV{font-variant-numeric:tabular-nums}
+.simDelta .sdD{margin-left:auto;color:var(--muted2);font-variant-numeric:tabular-nums}
 .homeGrid{display:grid;grid-template-columns:322px 1fr 372px;gap:12px;padding:12px;height:100%;overflow:hidden}
 @media(max-width:1560px){.homeGrid{grid-template-columns:292px 1fr 340px}}
 
@@ -886,12 +941,18 @@ table.tbl td.str{font-weight:700;color:var(--ink)}
 <script type="module">
 /* ══════════════════════════════════════════════════════════════════
    BEES HOME v0.9 · 부팅 — ES 모듈 로드 후 초기 렌더
+   v0.8 단일 파일을 9개 모듈로 분할했다. 로직은 그대로다.
+   file:// 로 열면 모듈 import 가 CORS 로 차단된다 — 로컬 서버로 열 것.
    ══════════════════════════════════════════════════════════════════ */
 import {$,COMPLEX,MODULE_TYPES} from './data/module.js';
 import {state} from './data/state.js';
 import {renderRoleSel,renderEnvStrip} from './render/shell.js';
 import './pages/resident.js';
 import './pages/admin.js';
+import {loadSimCases} from './pages/simulator.js';
+
+/* HM-15 시뮬레이션 결과는 JSON 정적 로드다 — 렌더가 동기라 부팅에서 먼저 받는다 */
+await loadSimCases();
 
 /* ══════════ 초기화 ══════════ */
 /* 부팅 화면 지표도 공간 계층 상수에서 파생시킨다 */

@@ -3,7 +3,8 @@ import {COMPLEX,spaceOf} from './module.js';
 import {MODULE} from './moduleUnit.js';
 import {ALARMS,RECS,REQUESTS,SAFETY} from './ops.js';
 
-export const TIERS=[{n:1,to:200,won:120.0},{n:2,to:400,won:214.6},{n:3,to:9999,won:307.3}];
+/* 전기 요금 엔진(RATE·billOf·tiersOf 등)은 data/module.js 에 있다.
+   ops.js 가 평가 시점에 billOf 를 호출하므로 leaf 모듈에 둬야 순환이 없다. */
 
 
 /* 상태 등급 규칙 */
@@ -16,7 +17,11 @@ export const GRADE_C=[{k:'추움',c:'#4a7fd6',max:18},{k:'서늘',c:'#5ea8d6',ma
 export const GRADE_A=[{k:'좋음',c:'#1a9c6a',max:49},{k:'보통',c:'#0877ed',max:69},
                {k:'나쁨',c:'#e08a12',max:84},{k:'매우 나쁨',c:'#d64545',max:999}];
 
-export const gradeOf=(list,v)=>list.find(g=>v<=g.max)||list[list.length-1];
+/* 측정원이 없으면 등급을 만들지 않는다 — null 은 '센서 없음' 으로 표기한다.
+   (null<=18 이 true 라 가드 없이는 '추움'·'좋음' 으로 오표기된다)          */
+export const GRADE_NONE={k:'센서 없음',c:'#96a1b0',max:null};
+export const gradeOf=(list,v)=>
+  v==null?GRADE_NONE:(list.find(g=>v<=g.max)||list[list.length-1]);
 
 
 /* ══════════ 알람 (FRD Alarm · FR-MON-02) ══════════ */
@@ -42,7 +47,7 @@ export const WSTATUS={planned:'예정',progress:'진행 중',reported:'완료 �
 /* ══════════════════════════════════════════════════════════════════
    v0.7 추가 데이터
    ══════════════════════════════════════════════════════════════════ */
-/* ── 역할 (PRD 3.1 · FR-ADM-02 RBAC) ── */
+/* ── 역할 (PRD 3.1 · FR-ADM-02 권한 관리) ── */
 export const ROLES={
   resident:{nm:'입주민', icon:'🏠', scope:MODULE.id,
     d:'본인 세대 + 공용 서비스 정보만 조회', user:'김민준'},
@@ -52,14 +57,6 @@ export const ROLES={
     d:'배정된 작업에 필요한 최소 정보만 접근', user:'성진엘리베이터 정우성'},
   admin:{nm:'운영 관리자', icon:'🛠', scope:`${COMPLEX.nm} 전체`,
     d:'단지 전체 조회 및 운영 정책 설정', user:'최은영'},
-};
-
-/* 역할별 접근 가능 메뉴 (RBAC 매트릭스) */
-export const RBAC={
-  resident:['home','envpred','energy','neighbor','request','reqstat','scenario','roadmap','lifespan','remodel','material','pipe','history','transfer'],
-  facility:['dash','map','alarm','req','work','energy8','roadmap','safety'],
-  admin:['dash','map','alarm','req','work','energy8','report','rec','roadmap','safety','audit'],
-  partner:[],
 };
 
 
@@ -76,6 +73,8 @@ export const PAGES={
   neighbor:{nm:'이웃 세대 비교',     i:'👥', c:'HM-03', fr:'FR-ENG-02', tier:'T2'},
   energy:  {nm:'에너지 사용 분석',   i:'⚡', c:'HM-06', fr:'FR-ENG-01', tier:'T2'},
   scenario:{nm:'절감 시나리오',      i:'🔬', c:'HM-07', fr:'FR-SIM-06', tier:'T1'},
+  /* OpenModelica 물리 시뮬레이션 결과 열람 — 실연산은 백엔드 밖이라 T2 */
+  simulator:{nm:'에너지 시뮬레이터', i:'🧪', c:'HM-15', fr:'FR-SIM-03', tier:'T2'},
   request: {nm:'민원·하자 접수',     i:'📝', c:'HM-04', fr:'FR-CSM-01', tier:'T2'},
   reqstat: {nm:'처리 현황',          i:'🔍', c:'HM-05', fr:'FR-CSM-04', tier:'T2'},
   lifespan:{nm:'설비 수명 예측',     i:'📅', c:'HM-08', fr:'FR-SIM-04', tier:'T3'},
@@ -109,12 +108,13 @@ export const ROADMAP=[
   {k:'audit',   ph:'별도 모듈 검토',d:'조회·변경 기록을 보존해 접근 이력을 추적합니다.'},
 ];
 
-/* T3 8개 화면은 사이드바에서 빼고 'roadmap' 하나로 대체한다 */
+/* T3 8개 화면은 사이드바에서 빼고 'roadmap' 하나로 대체한다.
+   NAVG 가 역할별 접근 범위의 단일 출처다 (별도 권한 매트릭스 상수를 두지 않는다). */
 export const NAVG={
   resident:[
     {g:'우리 집',      items:['home']},
     {g:'생활 환경',    items:['envpred','neighbor']},
-    {g:'에너지',       items:['energy','scenario']},
+    {g:'에너지',       items:['energy','scenario','simulator']},
     {g:'서비스',       items:['request','reqstat']},
     {g:'확장 계획',    items:['roadmap']},
   ],
@@ -132,8 +132,15 @@ export const NAVG={
   ],
 };
 
+/* 역할의 사이드바 화면 집합 — NAVG 에서 파생한다.
+   T3 화면(material·pipe·safety·audit 등)은 여기 없다. 각 화면의 버튼으로만
+   들어가고, 역할이 바뀌면 그 역할의 진입 화면으로 되돌린다.              */
+export const allowedPages=role=>(NAVG[role]||[]).flatMap(g=>g.items);
+/* 역할 진입 화면 — 사이드바 첫 항목 */
+export const landingPage=role=>((NAVG[role]||[])[0]||{items:[]}).items[0];
 
-export const BOOT_MSGS=['공간 마스터 로드','센서 412개 연결 확인','BMS · IoT · CCTV 연계 점검','알람 규칙 적용','권한(RBAC) 매트릭스 확인','준비 완료'];
+
+export const BOOT_MSGS=['공간 마스터 로드','센서 412개 연결 확인','BMS · IoT · CCTV 연계 점검','알람 규칙 적용','역할별 접근 범위 확인','준비 완료'];
 
 export const SCOPE_NOTE=`<div class="scopeBanner"><span style="font-size:15px">⚠</span>
   <span>이 화면은 <b>PRD 기능요구사항(F-001~F-710)에 정의되지 않은 기능</b>입니다.
@@ -156,4 +163,4 @@ export const AIQ={
 };
 
 /* 인라인 핸들러가 참조하는 심볼을 window 에 등록 (동작 유지) */
-Object.assign(window,{TIERS,GRADE_E,GRADE_C,GRADE_A,gradeOf,SEV,ASTATUS,RSTATUS,RSTEPS,RCAT,WSTATUS,ROLES,RBAC,PAGES,ROADMAP,NAVG,BOOT_MSGS,SCOPE_NOTE,TABS,AIQ});
+Object.assign(window,{GRADE_E,GRADE_C,GRADE_A,GRADE_NONE,gradeOf,SEV,ASTATUS,RSTATUS,RSTEPS,RCAT,WSTATUS,ROLES,PAGES,ROADMAP,NAVG,allowedPages,landingPage,BOOT_MSGS,SCOPE_NOTE,TABS,AIQ});

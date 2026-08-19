@@ -43,6 +43,47 @@ export function svgMulti(series,w,h,limit){
         stroke-linejoin="round" stroke-linecap="round" ${s.dash?'stroke-dasharray="5 4"':''}/>`;}).join('')+`</svg>`;
 }
 
+/* ── x 간격이 일정하지 않은 시계열 ─────────────────────────────────
+   svgArea·svgMulti 는 인덱스를 x 로 쓴다. 시뮬레이션 결과는 표본 간격이
+   0.083h ~ 2h 로 불균일하므로 (x,y) 쌍을 그대로 받는 헬퍼가 따로 필요하다.
+     series : [{pts:[[x,y],...], c:색, dash:점선여부, fillTo:다른계열index}]
+     ax     : {x0,x1,y0,y1, xTicks:[], yTicks:[], xUnit, yUnit}          */
+export function svgXY(series,w,h,ax){
+  const PL=42,PR=8,PT=8,PB=20;                       // 축 여백
+  const iw=w-PL-PR, ih=h-PT-PB;
+  const sx=v=>PL+(v-ax.x0)/((ax.x1-ax.x0)||1)*iw;
+  const sy=v=>PT+ih-(v-ax.y0)/((ax.y1-ax.y0)||1)*ih;
+  const path=pts=>pts.map((p,i)=>`${i?'L':'M'}${sx(p[0]).toFixed(1)},${sy(p[1]).toFixed(1)}`).join(' ');
+  let out='';
+  /* 격자 + y 눈금 */
+  (ax.yTicks||[]).forEach(t=>{
+    out+=`<line x1="${PL}" y1="${sy(t).toFixed(1)}" x2="${w-PR}" y2="${sy(t).toFixed(1)}" stroke="#eef2f7" stroke-width="1"/>
+      <text x="${PL-5}" y="${(sy(t)+3.5).toFixed(1)}" text-anchor="end" font-size="9" fill="#96a1b0">${t}</text>`;
+  });
+  /* x 눈금 */
+  (ax.xTicks||[]).forEach(t=>{
+    out+=`<text x="${sx(t).toFixed(1)}" y="${h-6}" text-anchor="middle" font-size="9" fill="#96a1b0">${t}</text>`;
+  });
+  /* 두 계열 사이 영역 채우기 (fillTo 지정 시) */
+  series.forEach((s,i)=>{
+    if(s.fillTo===undefined)return;
+    const b=series[s.fillTo]; if(!b)return;
+    const d=path(s.pts)+' '+b.pts.slice().reverse()
+      .map(p=>`L${sx(p[0]).toFixed(1)},${sy(p[1]).toFixed(1)}`).join(' ')+' Z';
+    out+=`<path d="${d}" fill="${s.c}" fill-opacity=".12"/>`;
+  });
+  series.forEach(s=>{
+    out+=`<path d="${path(s.pts)}" fill="none" stroke="${s.c}" stroke-width="${s.wd||1.8}"
+      vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"
+      ${s.dash?'stroke-dasharray="5 4"':''}/>`;
+  });
+  /* 축선 */
+  out+=`<line x1="${PL}" y1="${PT}" x2="${PL}" y2="${PT+ih}" stroke="#dde4ec" stroke-width="1"/>
+    <line x1="${PL}" y1="${PT+ih}" x2="${w-PR}" y2="${PT+ih}" stroke="#dde4ec" stroke-width="1"/>`;
+  return `<svg class="miniChart" viewBox="0 0 ${w} ${h}" width="100%" height="${h}"
+    preserveAspectRatio="none" role="img">${out}</svg>`;
+}
+
 export function gaugeArc(pct,label,sub){
   const R=52,cx=68,cy=64, a0=Math.PI*0.82, a1=Math.PI*2.18;
   const ang=a0+(a1-a0)*clamp(pct,0,1);
@@ -72,4 +113,4 @@ export function donut(segs,size,inner){
 
 
 /* 인라인 핸들러가 참조하는 심볼을 window 에 등록 (동작 유지) */
-Object.assign(window,{svgArea,svgBars,svgMulti,gaugeArc,donut});
+Object.assign(window,{svgArea,svgBars,svgMulti,svgXY,gaugeArc,donut});

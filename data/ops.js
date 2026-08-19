@@ -1,17 +1,86 @@
 /* BEES Home v0.9 · data/ops.js — 운영 데이터 (알람·민원·작업·안전·에너지) */
-import {COMMON,MODULE_AREA,MODULE_TYPES,UNIT_REF,rnd,spaceOf,typeNmOf,typeOfLoc} from './module.js';
-import {MODULE} from './moduleUnit.js';
+import {COMMON,DEVICES,MODULE_AREA,MODULE_TYPES,NOW,SPACES,UNIT_REF,billOf,devicesOf,marginalWon,rnd,spaceOf,typeNmOf,typeOfLoc} from './module.js';
+import {HOUSE_EQUIP,MODULE,equipKwhOf} from './moduleUnit.js';
 
 /* ══════════ 4. 전기 사용량 (센서필드 §4) ══════════ */
+/* ══════════ 기기 일일 가동시간 (h) — 단계 8 수정 2 ══════════════════
+   kwhToday = meas.w × 가동시간 / 1000.  순시 전력과 일일 사용량을 연동한다.
+   냉장고는 압축기 가동률(약 33%)을 등가 가동시간 8.0h 로 환산했다.
+   ※ 현재 꺼진 기기는 meas.w=0 이라 산식상 0 이 된다 (product.ratedW 미확보).
+     실제로는 그날 켜져 있던 시간만큼 사용량이 있으므로, 자재 마스터 확보 후
+     ratedW × 가동시간으로 바꿔야 한다.                                    */
+/* ※ SED 규격상 전력(TEL 0·1)은 콘센트(SEO)·전등(SEL)만 보고한다.
+     스위치(SES)·커튼(SEC)은 여기 없다 — 후드·환기팬 전력은 미제공이다.
+   ※ 덕트 공조라 실내 에어컨이 없다 (v0.4 2매). 가전은 냉장고·TV·공기청정기
+     3종뿐이고 나머지는 전등이다. 냉방·환기 전력은 HOUSE_EQUIP 로 분리했다. */
+export const RUNTIME_H={
+  SEO_35:5.0, SEO_37:14.0, SEL_6:5.0,             // 거실·식당 (TV · 공기청정기 · 조명)
+  SEO_42:8.0, SEL_12:4.0,                         // 주방 (냉장고 · 조명)
+  SEL_3:4.0,                                      // 침실 (조명)
+  SEL_15:1.5,                                     // 욕실 (조명)
+};
+/* 기기별 일일 사용량 · 공간별 합계 · 세대 합계를 순시 전력에서 파생시킨다.
+   규칙 §9 : 공간별 kwh 합계 = 세대 todayKwh (이 코드로 항등이 보장된다)
+   ※ 연동 시 이 산식은 폐기하고 TEL 1(소비 전력 kWh) 실측으로 대체한다.  */
+DEVICES.forEach(d=>{
+  if(d.meas.kwhToday===undefined)return;          // 전력 미보고 타입은 건너뛴다
+  d.meas.kwhToday=+((d.meas.w*(RUNTIME_H[d.id]||0))/1000).toFixed(3);
+});
+SPACES.forEach(sp=>{
+  sp.kwh=+devicesOf(sp.id).reduce((a,d)=>a+(d.meas.kwhToday||0),0).toFixed(3);
+});
+/* SED 계측 합계 — 콘센트·전등만. 스위치·커튼은 규격상 전력을 보고하지 않는다 */
+const SED_KWH=+SPACES.reduce((a,sp)=>a+sp.kwh,0).toFixed(3);
+
+/* 세대 설비(덕트 공조·환기 유닛) — SED 계측 밖. 정격 × 가동시간 가정 산출.
+   덕트 공조라 실내기가 없어 냉방 전력이 콘센트에 잡히지 않는다 (v0.4 2매).
+   이 항목을 빼면 세대 사용량이 비현실적으로 낮아지므로 총량에 합산한다.     */
+export const EQUIP_DETAIL=HOUSE_EQUIP.map(e=>({...e,
+  kwhToday:equipKwhOf(e),
+  /* 화면 표기용 산식 문구 — 열량 기반은 COP 를 드러낸다 */
+  formula:e.fanW!=null ? `${e.fanW}W × ${e.runtimeH}h`
+                       : `${e.loadKw}kW ÷ COP ${e.cop} × ${e.runtimeH}h`}));
+export const EQUIP_KWH=+EQUIP_DETAIL.reduce((a,e)=>a+e.kwhToday,0).toFixed(3);
+
+/* 세대 총 사용량 = SED 계측(콘센트·전등) + 세대 설비(가정) */
+const TODAY_KWH=+(SED_KWH+EQUIP_KWH).toFixed(3);
+
+/* 시간대 프로파일 — 합계가 todayKwh 와 정확히 일치하도록 정규화한다 */
+const HOUR_SHAPE=Array.from({length:24},(_,i)=>
+  0.30 + (i>=7&&i<=9?0.55:0) + (i>=12&&i<=14?0.35:0)
+       + (i>=17&&i<=22?1.35:0) + rnd(i+40)*0.20);
+const HOUR_SUM=HOUR_SHAPE.reduce((a,v)=>a+v,0);
+
+/* 일별 — 8월 1~7일 경과. 오늘(7일)은 todayKwh, 나머지는 ±12% 변동 */
+const DAYS_PASSED=7;
+const DAILY=Array.from({length:31},(_,i)=>{
+  if(i>=DAYS_PASSED)return 0;
+  if(i===DAYS_PASSED-1)return TODAY_KWH;
+  return +(TODAY_KWH*(0.88+rnd(i+70)*0.24)).toFixed(2);
+});
+const MONTH_KWH=+DAILY.reduce((a,v)=>a+v,0).toFixed(1);
+const FORECAST_KWH=+(MONTH_KWH/DAYS_PASSED*31).toFixed(1);
+const BILL=billOf(FORECAST_KWH,NOW.m);
+
+/* 콘센트 순위 — 기기 실사용량에서 파생. 기간 총량을 넘지 않는다 (수정 3) */
+const rankOf=(mult)=>DEVICES
+  .filter(d=>d.meas.kwhToday>0)
+  .sort((a,b)=>b.meas.kwhToday-a.meas.kwhToday).slice(0,3)
+  .map(d=>({nm:d.nm.replace(/ ?콘센트| ?스위치/,''), rm:spaceOf(d.space).nm,
+            kwh:+(d.meas.kwhToday*mult).toFixed(2)}));
+
 export const ENERGY={
-  todayKwh:3.2,
-  hourly:Array.from({length:24},(_,i)=>+(0.06+rnd(i+40)*0.09+(i>=17&&i<=22?0.16:0)+(i>=7&&i<=9?0.08:0)).toFixed(3)),
-  monthKwh:21.8, monthPrev:21.8, forecastKwh:97.0, tier:1, forecastWon:12550,
-  daily:Array.from({length:31},(_,i)=>i<7?+(2.6+rnd(i+70)*1.4).toFixed(2):0),
+  todayKwh:TODAY_KWH,
+  /* 계보 분리 — 화면에서 「계측분 / 설비분」을 구분해 표기한다 */
+  sedKwh:SED_KWH, equipKwh:EQUIP_KWH, equip:EQUIP_DETAIL,
+  hourly:HOUR_SHAPE.map(v=>+(v/HOUR_SUM*TODAY_KWH).toFixed(3)),
+  monthKwh:MONTH_KWH, monthPrev:MONTH_KWH, forecastKwh:FORECAST_KWH,
+  tier:BILL.tier, forecastWon:BILL.total, bill:BILL, daysPassed:DAYS_PASSED,
+  daily:DAILY,
   outlets:{
-    일간:[{nm:'인덕션',rm:'주방',kwh:0.72},{nm:'에어컨',rm:'거실',kwh:0.68},{nm:'냉장고',rm:'주방',kwh:0.41}],
-    주간:[{nm:'에어컨',rm:'거실',kwh:38.4},{nm:'냉장고',rm:'주방',kwh:24.2},{nm:'에어컨',rm:spaceOf('bedroom').nm,kwh:21.6}],
-    월간:[{nm:'에어컨',rm:'거실',kwh:118.6},{nm:'냉장고',rm:'주방',kwh:96.8},{nm:'인덕션',rm:'주방',kwh:41.2}],
+    일간:rankOf(1),
+    주간:rankOf(DAYS_PASSED),                 // 최근 7일
+    월간:rankOf(31),                          // 예상 월간 (forecast 대비 검산)
   },
 };
 
@@ -24,9 +93,9 @@ export let ALARMS=[
   src:'소비전력 정격 대비 138% · 20분 지속', act:'실외기 팬·필터 점검'},
  {id:'AL-2608-038',type:'통신 장애',sev:2,loc:UNIT_REF.c04,eq:'IoT GW-C-04',at:'08-07 14:48',st:'occurred',rep:1,grp:null,
   src:'마지막 수신 14:18 · 기준 30분 초과', act:'게이트웨이 전원·네트워크 확인'},
- {id:'AL-2608-037',type:'실내 온도 상한 초과',sev:3,loc:`${MODULE.id} ${spaceOf('living').nm}`,eq:'SEA_2',at:'08-07 14:20',st:'ack',rep:5,grp:'G-02',
+ {id:'AL-2608-037',type:'실내 온도 상한 초과',sev:3,loc:`${MODULE.id} ${spaceOf('living').nm}`,eq:'SEL_6',at:'08-07 14:20',st:'ack',rep:5,grp:'G-02',
   src:'29.1℃ · 재실 냉방 상한 26℃ 3시간 초과', act:'서향 일사 · 전동커튼 SEC_1 자동 제어 검토'},
- {id:'AL-2608-036',type:'실내 온도 상한 초과',sev:3,loc:`${UNIT_REF.a03} ${spaceOf('living').nm}`,eq:'SEA_2',at:'08-07 14:05',st:'occurred',rep:4,grp:'G-02',
+ {id:'AL-2608-036',type:'실내 온도 상한 초과',sev:3,loc:`${UNIT_REF.a03} ${spaceOf('living').nm}`,eq:'SEL_6',at:'08-07 14:05',st:'occurred',rep:4,grp:'G-02',
   src:'31.8℃ · 재실 냉방 상한 26℃ 30분 초과', act:'서향 일사 · 전동커튼 자동 제어 검토'},
  {id:'AL-2608-035',type:'CO₂ 농도 초과',sev:3,loc:`${UNIT_REF.a04} ${spaceOf('living').nm}`,eq:'ERV-A-04',at:'08-07 13:40',st:'done',rep:2,grp:'G-01',
   src:'CO₂ 861ppm · 기준 800ppm', act:'환기 유닛 급기량 상향 완료'},
@@ -36,9 +105,9 @@ export let ALARMS=[
   src:'동일 평형 그룹 평균 +2.4σ 이탈', act:'세대 확인 요청'},
  {id:'AL-2608-032',type:'필터 교체 주기 도래',sev:4,loc:COMMON.vent,eq:'AHU-1-01',at:'08-07 08:00',st:'occurred',rep:1,grp:null,
   src:'누적 운전 2,160시간 · 기준 2,000시간', act:'프리필터 교체'},
- {id:'AL-2608-031',type:'결로 위험',sev:3,loc:`${UNIT_REF.c01} 창측`,eq:'SEA_31',at:'08-07 07:30',st:'hold',rep:2,grp:null,
+ {id:'AL-2608-031',type:'결로 위험',sev:3,loc:`${UNIT_REF.c01} 창측`,eq:'SEL_31',at:'08-07 07:30',st:'hold',rep:2,grp:null,
   src:'표면온도 추정 19.2℃ · 노점 18.6℃', act:'제습·환기 안내 발송 (동절기 재검토)'},
- {id:'AL-2608-030',type:'미세먼지 농도 초과',sev:4,loc:COMMON.lobby,eq:'SEA_L2',at:'08-06 19:40',st:'done',rep:1,grp:null,
+ {id:'AL-2608-030',type:'미세먼지 농도 초과',sev:4,loc:COMMON.lobby,eq:'SES_L2',at:'08-06 19:40',st:'done',rep:1,grp:null,
   src:'PM2.5 42㎍/㎥ · 기준 35㎍/㎥', act:'공기청정 유닛 자동 가동 완료'},
  {id:'AL-2608-029',type:'냉방 설비 비정상 운전',sev:2,loc:COMMON.util,eq:'EHP-2-03',at:'08-06 15:05',st:'done',rep:1,grp:null,
   src:'소비전력 정격 대비 131%', act:'필터 청소 완료'},
@@ -135,8 +204,32 @@ export let WORKORDERS=[
 ];
 
 
-/* ══════════ 예방 정비 권고 · 최적화 권고 (FR-MNT-06 / FR-SIM-06,07) ══════════ */
+/* ══════════ 예방 정비 권고 · 최적화 권고 (FR-MNT-06 / FR-SIM-06,07) ══════════
+   type — 운전 / 정비 / 공지 / 설계
+   '설계' 는 운영으로 못 고치고 모듈 설계를 바꿔야 하는 권고다. 모듈러는 공장
+   생산이므로 이미 설치된 유닛에 즉시 반영할 수 없다. 그래서 아래 3필드를 갖는다.
+     target     '즉시 반영' | '차기 생산분' — 반영 시점
+     cfdCase    근거가 된 CFD 케이스 추적 번호 (문자열 · 화면 표기용)
+     moduleType 대상 모듈 타입 (MODULE_TYPES 의 id)
+   ※ cfdCase 는 data/cfdCases.json 의 키가 아니라 근거 추적용 표기 번호다.
+     실제 케이스와의 대응은 basis 문구에 남긴다.                              */
 export let RECS=[
+ {id:'RC-020',type:'설계',fr:'FR-SIM-08',nm:`${typeNmOf('MODULAR-A')} 서측 창호 차양 표준 적용`,
+  target:'차기 생산분', cfdCase:'CFD-07', moduleType:'MODULAR-A',
+  body:`${typeNmOf('MODULAR-A')} 서측 창호에 외부 차양(고정 루버)을 표준 사양으로 추가할 것을 권고합니다. 전동커튼 자동 제어는 실내측 대응이라 유리 표면 취득열 자체를 줄이지 못합니다.`,
+  basis:['CFD 케이스 「거실만 냉방 · 외기 34℃」 — 주방 존 41.4℃ 로 설정온도 도달 실패',
+         '반복 알람 그룹 G-02 · 동일 타입 2기에서 동일 현상',
+         '차양은 생산 단계 설치 항목 — 기설치 유닛 후속 적용은 별도 검토'],
+  eff:[{l:'대상',v:'차기 생산분'},{l:'적용 타입',v:typeNmOf('MODULAR-A')},{l:'신뢰도',v:'중'}],
+  side:'동절기 일사 취득이 함께 줄어 난방 부하가 늘 수 있습니다. 계절별 재산출이 필요합니다.', st:'pending'},
+ {id:'RC-019',type:'설계',fr:'FR-SIM-08',nm:`${typeNmOf('MODULAR-A')} 주방 급기 경로 분리`,
+  target:'차기 생산분', cfdCase:'CFD-04', moduleType:'MODULAR-A',
+  body:`${typeNmOf('MODULAR-A')}은 주방이 거실 냉방 경로 끝단에 있어 냉기가 도달하지 않습니다. 환기 유닛 급기 덕트를 주방으로 분기하는 사양 변경을 권고합니다.`,
+  basis:['CFD 전 케이스에서 주방 존이 항상 최고온 — 거실 대비 +9℃ 이상',
+         '현재 급기 경로는 거실·침실 2계통 (data/cfdConstants.js servedSpaces)',
+         '덕트 경로 변경은 모듈 골조 단계 작업 — 현장 개조 불가'],
+  eff:[{l:'대상',v:'차기 생산분'},{l:'적용 타입',v:typeNmOf('MODULAR-A')},{l:'신뢰도',v:'중'}],
+  side:'급기 분기 시 거실 토출 풍량이 줄어듭니다. 유닛 용량 재검토가 선행되어야 합니다.', st:'pending'},
  {id:'RC-018',type:'정비',fr:'FR-MNT-06',nm:'EHP-2-03 점검 주기 단축',
   body:'최근 30일 내 동일 설비 고장성 작업이 3회 발생했습니다. 점검 주기를 분기 → 월 1회로 단축하고 프리필터를 조기 교체할 것을 권고합니다.',
   basis:['AL-2608-039 · AL-2608-029 · AL-2608-021 (30일 내 3회)','소비전력 정격 대비 평균 128% (기준 110%)'],
@@ -297,20 +390,36 @@ export const NEIGHBOR={
 };
 
 /* ── 에너지 절감 시나리오 (modular F-14 · PRD F-706) ── */
-export const SCENARIOS=[
+/* ══════════ 절감 시나리오 (단계 8 수정 6) ══════════════════════════
+   금액은 임의 단가(구 720원/kWh)가 아니라 해당 세대의 누진 한계 단가로 계산한다.
+   한계 단가 = (단계 전력량요금 + 기후환경 + 연료비조정) × (1 + 부가세 + 기금)
+   회수기간(개월) = 투자비 / 월 절감액.
+   회수기간이 설비 수명(life, 개월)을 넘으면 금액을 표시하지 않고
+   「경제성 낮음 · 쾌적 개선 목적」으로 표기한다 (규칙 §9).            */
+const MARGINAL=marginalWon(FORECAST_KWH,NOW.m);          // 원/kWh
+const SCN_SEED=[
  {id:'S1',nm:'대기전력 자동 차단',d:'미사용 30분 후 콘센트 전원을 자동 차단합니다. 설정만으로 적용되며 비용이 들지 않습니다.',
-  save:4.6,won:3200,cost:0,pay:0,diff:'쉬움',eff:'즉시'},
+  save:4.6,cost:0,life:null,diff:'쉬움',eff:'즉시'},
  {id:'S2',nm:'냉방 설정온도 +1℃',d:'12~16시 부하 집중 시간대에만 설정온도를 1℃ 올립니다. 쾌적 범위는 유지됩니다.',
-  save:8.2,won:5900,cost:0,pay:0,diff:'쉬움',eff:'즉시'},
+  save:8.2,cost:0,life:null,diff:'쉬움',eff:'즉시'},
+ /* 구현 메모 (화면 표시 없음) —
+    커튼 제어는 별도 서버(192.168.0.51) 경유, Lambda 구현 시 별도 엔드포인트 필요 */
  {id:'S3',nm:'서향 전동커튼 자동화',d:`일사량 연동으로 14~18시 전동커튼을 자동 폐쇄합니다. ${spaceOf('living').nm} 고온 문제도 함께 완화됩니다.`,
-  save:12.4,won:8900,cost:0,pay:0,diff:'보통',eff:'설정 후'},
+  save:12.4,cost:0,life:null,diff:'보통',eff:'설정 후'},
  {id:'S4',nm:'고효율 에어컨 교체',d:'1등급 인버터 모델로 교체합니다. 설비 투자가 필요합니다.',
-  save:26.8,won:19300,cost:1200000,pay:62,diff:'어려움',eff:'교체 후'},
+  save:26.8,cost:1200000,life:180,diff:'어려움',eff:'교체 후'},   // 에어컨 수명 15년
  {id:'S5',nm:'창호 단열 필름 시공',d:'서향 창에 로이 필름을 시공해 일사 유입을 줄입니다.',
-  save:9.6,won:6900,cost:480000,pay:70,diff:'보통',eff:'시공 후'},
+  save:9.6,cost:480000,life:120,diff:'보통',eff:'시공 후'},        // 필름 수명 10년
  {id:'S6',nm:'전체 적용 (S1+S2+S3)',d:'비용이 들지 않는 3개 시나리오를 모두 적용합니다.',
-  save:23.1,won:16600,cost:0,pay:0,diff:'보통',eff:'즉시'},
+  save:25.2,cost:0,life:null,diff:'보통',eff:'즉시'},              // S1+S2+S3 합계
 ];
+export const SCENARIOS=SCN_SEED.map(s=>{
+  const won=Math.round(s.save*MARGINAL/10)*10;
+  const pay=s.cost>0?Math.ceil(s.cost/won):0;
+  const overLife=s.life!=null&&pay>s.life;
+  return {...s, won, pay, marginal:+MARGINAL.toFixed(1), overLife,
+    note:overLife?'경제성 낮음 · 쾌적 개선 목적':null};
+});
 
 /* ── 리모델링 옵션 (modular F-17 · PRD 범위 밖) ── */
 export const REMODEL=[
@@ -411,4 +520,4 @@ IFACES.splice(4,0,{id:'IF-CCTV',nm:'CCTV 영상 이벤트',proto:'RTSP / 이벤�
 MODULE_TYPES.forEach(t=>{ t.wo=WORKORDERS_COUNT_BY_TYPE[t.id]||0; });
 
 /* 인라인 핸들러가 참조하는 심볼을 window 에 등록 (동작 유지) */
-Object.assign(window,{ENERGY,ALARMS,REQUESTS,WORKORDERS,RECS,RISKS,WORKORDERS_COUNT_BY_TYPE,typeGroups,ENG_TREND,KPIS,IFACES,TIMELINE,NOTI,HOMEHIST,TRANSFER_ITEMS,NEIGHBOR,SCENARIOS,REMODEL,ENVPRED,SAFE_SEV,SAFETY,CCTVS,AUDIT,PARTNERS,COSTS,WORKTIME});
+Object.assign(window,{ENERGY,EQUIP_KWH,EQUIP_DETAIL,ALARMS,REQUESTS,WORKORDERS,RECS,RISKS,WORKORDERS_COUNT_BY_TYPE,typeGroups,ENG_TREND,KPIS,IFACES,TIMELINE,NOTI,HOMEHIST,TRANSFER_ITEMS,NEIGHBOR,SCENARIOS,REMODEL,ENVPRED,SAFE_SEV,SAFETY,CCTVS,AUDIT,PARTNERS,COSTS,WORKTIME});

@@ -60,8 +60,9 @@ function zoneColor(sp){
 }
 function zoneLabel(sp){
   if(state.planTab==='energy')  return fx(sp.kwh,2)+' kWh';
-  if(state.planTab==='comfort') return fx(sp.env.temp)+'°C';
-  if(state.planTab==='air')     return '지수 '+aqiOf(sp);
+  /* 측정원이 없는 공간은 숫자 대신 '센서 없음' — 2D 평면도와 같은 규칙 */
+  if(state.planTab==='comfort') return sp.env.temp==null?'센서 없음':fx(sp.env.temp)+'°C';
+  if(state.planTab==='air')     {const a=aqiOf(sp);return a==null?'센서 없음':'지수 '+a;}
   const l=devicesOf(sp.id); return l.filter(d=>d.meas.on).length+' / '+l.length;
 }
 

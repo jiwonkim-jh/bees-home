@@ -1,12 +1,12 @@
 /* BEES Home v0.9 · pages/resident.js — HM-01~HM-13 · RM-01 입주민 화면 */
 import {GRADE_A,GRADE_C,GRADE_E,PAGES,RCAT,ROADMAP,RSTATUS,RSTEPS,SCOPE_NOTE,TABS,gradeOf} from '../data/const.js';
-import {$,DEV_CTRL_INIT,LIFESPAN,MATERIALS,MYUNIT,NOW,PIPES,STYPE,aqiOf,clamp,devicesOf,fx,iconOf,plL,plX,plY,planShell,rnd,sensorReading,spaceOf,won} from '../data/module.js';
-import {MODULE,SPACES} from '../data/moduleUnit.js';
+import {$,tiersOf,DEV_CTRL_INIT,LIFESPAN,MATERIALS,MYUNIT,NOW,PIPES,STYPE,aqiOf,clamp,devicesOf,fx,iconOf,occupancyOf,plL,plX,plY,planShell,rnd,sensorReading,spaceOf,TIMETXT,tvocGradeOf,won} from '../data/module.js';
+import {MEASURES,MODULE,PLUG_MODES,SPACES} from '../data/moduleUnit.js';
 import {ENERGY,ENVPRED,HOMEHIST,NEIGHBOR,NOTI,REMODEL,REQUESTS,RISKS,SAFETY,SCENARIOS,TRANSFER_ITEMS} from '../data/ops.js';
 import {state} from '../data/state.js';
 import {gaugeArc,svgArea,svgBars,svgMulti} from '../render/chart.js';
 import {closeAll,dlgOpen,pgHead,renderPage,renderSideNav,toast} from '../render/shell.js';
-import {openDetail,popDetail,clearDetail} from '../render/detail.js';
+import {openDetail,popDetail,clearDetail,rightMode,rightTo} from '../render/detail.js';
 import {render3D,toggle3DLayer,toggle3DCut,spin3D,zoom3D,reset3D,selectCfdCase} from '../render/scene3d.js';
 /* 3D 뷰의 인라인 핸들러도 window 에 등록한다 (2D 와 같은 방식) */
 Object.assign(window,{render3D,toggle3DLayer,toggle3DCut,spin3D,zoom3D,reset3D,selectCfdCase});
@@ -14,13 +14,29 @@ Object.assign(window,{render3D,toggle3DLayer,toggle3DCut,spin3D,zoom3D,reset3D,s
 export function pgHome(){
   const items=NOTI.resident.filter(n=>n.k==='w'||n.k==='r');
   const sp=spaceOf('living'), r={...sp.env, nm:sp.nm, aqi:aqiOf(sp)};
-  const tg=gradeOf(GRADE_C,r.temp), ag=gradeOf(GRADE_A,r.aqi), hOk=r.humi>=40&&r.humi<=60;
+  const tg=gradeOf(GRADE_C,r.temp), ag=gradeOf(GRADE_A,r.aqi);
+  const hOk=r.humi!=null&&r.humi>=40&&r.humi<=60;
+  const vg=tvocGradeOf(r.tvoc);
+  /* 측정원 없는 항목은 숫자를 만들지 않는다 — '센서 없음' 배지로 대체한다 */
+  const none=`<span class="srcb none">센서 없음</span>`;
+  /* bdg: 기본 계보 배지 외에 덧붙일 배지 (TVOC 는 계측 + 가정 2개) */
+  const eRow=(ic,nm,val,unit,col,note,bdg='')=>`<div class="envRow">
+    <span class="el"><span class="eic">${ic}</span>${nm} ${val==null?none:`<span class="srcb meas">계측</span>${bdg}`}</span>
+    <span class="er">${val==null
+      ? `<span class="ev" style="color:var(--muted2);font-size:15px">—</span>
+         <span class="eu">이 공간에 측정 기기 없음</span>`
+      : `<span class="ev" style="color:${col}">${val}${unit?`<small>${unit}</small>`:''}</span>
+         <span class="eu">${note}</span>`}</span></div>`;
+  const occ=occupancyOf();
+  const leakN=SPACES.filter(x=>x.leak).length;      // TEL 12 누전 감지 공간 수
   return `<div class="homeGrid">
     <div class="resCol">
       <div class="card unitCard">
         <div><div class="un">🏢 ${MYUNIT.nm}</div>
           <div class="ua">전용 ${MYUNIT.area}㎡ · ${MYUNIT.household}인 가구 · ${MYUNIT.movedIn} 입주</div></div>
-        <span class="pill ok dot">${MYUNIT.occupancy}</span>
+        ${occ
+          ? `<span class="pill ${occ.on?'ok':'mute'} dot" title="${occ.src} 재실감지">${occ.on?'재실 중':'부재 중'}</span>`
+          : `<span class="pill mute">재실 센서 없음</span>`}
       </div>
 
       <div class="card butler">
@@ -38,19 +54,18 @@ export function pgHome(){
 
       <div class="card">
         <div class="ch"><span class="ct"><span class="ci">🌿</span>실내환경</span><span class="pill mute">${r.nm}</span></div>
-        <div class="envRow"><span class="el"><span class="eic">🌡</span>실내온도</span>
-          <span class="er"><span class="ev" style="color:${tg.c}">${fx(r.temp)}<small>°C</small></span>
-          <span class="eu">적정범위 18~26°C · ${tg.k}</span></span></div>
-        <div class="envRow"><span class="el"><span class="eic">💧</span>실내습도</span>
-          <span class="er"><span class="ev" style="color:${hOk?'#1a9c6a':'#e08a12'}">${r.humi}<small>%</small></span>
-          <span class="eu">${hOk?'적절함':'조정 필요'} · 권장 40~60%</span></span></div>
-        <div class="envRow"><span class="el"><span class="eic">💨</span>공기질</span>
-          <span class="er"><span class="ev" style="color:${ag.c}">${fx(r.pm25)}<small>㎍/㎥</small></span>
-          <span class="eu">${ag.k} · 종합지수 ${r.aqi}</span></span></div>
-        <div class="envSub"><span>PM2.5 <b>${fx(r.pm25)}</b> ㎍/㎥</span><span>CO₂ <b>${r.co2}</b> ppm</span></div>
-        <div class="envRow"><span class="el"><span class="eic">🧪</span>TVOC</span>
-          <span class="er"><span class="ev" style="color:${r.tvoc<=400?'#1a9c6a':'#e08a12'}">${r.tvoc}<small>ppb</small></span>
-          <span class="eu">휘발성유기화합물 · 기준 400ppb</span></span></div>
+        ${eRow('🌡','실내온도',r.temp==null?null:fx(r.temp),'°C',tg.c,`적정범위 18~26°C · ${tg.k}`)}
+        ${eRow('💧','실내습도',r.humi,'%',hOk?'#1a9c6a':'#e08a12',`${hOk?'적절함':'조정 필요'} · 권장 40~60%`)}
+        ${eRow('💨','공기질',r.pm25==null?null:fx(r.pm25),'㎍/㎥',ag.c,`${ag.k} · 종합지수 ${r.aqi}`)}
+        ${r.pm25==null?'':`<div class="envSub"><span>PM2.5 <b>${fx(r.pm25)}</b> ㎍/㎥</span><span>CO₂ <b>${r.co2}</b> ppm</span></div>`}
+        ${/* TVOC 는 센서 실측값이지만 단위가 미정이라 등급 판정 기준이 가정값이다 → 배지 2개 */''}
+        ${eRow('🧪','TVOC',r.tvoc==null?null:vg.k,'',vg.c,'휘발성유기화합물 · 단위 미정 · 등급 기준은 가정값',
+               `<span class="srcb assume">가정</span>`)}
+        ${/* TEL 12 누전 — 콘센트·전등이 보고한다. 안전 지표라 상시 노출한다 */''}
+        ${eRow('⚡','누전 감지',leakN?`${leakN}개 공간 감지`:'정상',
+               '',leakN?'#d64545':'#1a9c6a',
+               leakN?'즉시 확인이 필요합니다':`${SPACES.length}개 공간 콘센트·전등 정상`)}
+        <div class="srcNote">SED 센서 5초 주기 실측 · 기압(TEL 4)은 센서 상세에서 확인</div>
       </div>
 
       <div class="card">
@@ -90,7 +105,7 @@ export function pgHome(){
   </div>`;
 }
 
-export function setPlanTab(k){state.planTab=k;state.selSensor=null;if(state.rightMode==='sensor')state.rightMode='space';renderPage();}
+export function setPlanTab(k){state.planTab=k;state.selSensor=null;if(rightMode()==='sensor')rightTo('space');renderPage();}
 
 export function tgSenior(){state.senior=!state.senior;renderPage();toast(state.senior?'시니어케어 ON — 장시간 미활동 감지 시 알림':'시니어케어 OFF');}
 
@@ -116,16 +131,19 @@ export function renderMyReq(){
 /* 평면도 */
 export function roomPaint(sp){
   if(state.planTab==='energy'){const g=gradeOf(GRADE_E,sp.kwh);return{c:g.c,k:g.k,v:fx(sp.kwh,2)+' kWh'};}
-  if(state.planTab==='comfort'){const g=gradeOf(GRADE_C,sp.env.temp);return{c:g.c,k:g.k,v:fx(sp.env.temp)+'°C'};}
-  if(state.planTab==='air'){const a=aqiOf(sp),g=gradeOf(GRADE_A,a);return{c:g.c,k:g.k,v:'지수 '+a};}
+  if(state.planTab==='comfort'){const t=sp.env.temp,g=gradeOf(GRADE_C,t);
+    return{c:g.c,k:g.k,v:t==null?'—':fx(t)+'°C'};}
+  if(state.planTab==='air'){const a=aqiOf(sp),g=gradeOf(GRADE_A,a);
+    return{c:g.c,k:g.k,v:a==null?'—':'지수 '+a};}
   const s=devicesOf(sp.id), on=s.filter(d=>d.meas.on).length;
   return{c:on?'#0877ed':'#96a1b0',k:on?'연결됨':'대기',v:`${on} / ${s.length}`};
 }
 
-/* 중앙 도면 모드 — 2D 평면도 / 3D 실내 뷰. 선택·지표 색은 양쪽이 공유한다 */
-export function setPlanMode(m){state.planMode=m;state.selSensor=null;
-  if(state.rightMode==='sensor')state.rightMode='space';
-  renderPage();}
+/* 중앙 도면 모드 — 2D 평면도 / 3D 실내 뷰.
+   선택 상태(selRoom·selSensor)와 우측 패널 스택은 그대로 유지한다.
+   양쪽이 같은 selectRoom / selectSensor 경로를 쓰므로 초기화할 이유가 없다.
+   (단계 3 에서 넣었던 selSensor 초기화는 단계 9 확인 1 에 따라 제거)      */
+export function setPlanMode(m){state.planMode=m;renderPage();}
 
 export function renderPlan(){
   if(state.planMode==='3d'){render3D();renderPlanLegend();return;}
@@ -176,35 +194,46 @@ export function renderPlanLegend(){
        `<span class="lgi"><i class="lgd" style="background:${g.c}"></i>${g.k}</span>`).join('');
 }
 
-export function selectRoom(id){state.selRoom=id;state.selSensor=null;state.rightMode='space';
+export function selectRoom(id){state.selRoom=id;state.selSensor=null;rightTo('space');
   if(state.page!=='home'){state.page='home';renderSideNav();renderPage();return;}
   renderPlan();renderRight();}
 
-export function backToSummary(){state.selRoom=null;state.selSensor=null;state.rightMode='summary';renderPlan();renderRight();}
+/* backToSummary / backToSpace 는 popDetail() 로 통합됐다 (단계 9) */
 
-export function backToSpace(){state.selSensor=null;state.rightMode='space';renderRight();}
 
-export function selectSensor(sid){state.selSensor=sid;state.rightMode='sensor';renderRight();}
+
+export function selectSensor(sid){state.selSensor=sid;rightTo('sensor');renderRight();}
 
 
 export function renderRight(){
   const el=$('resRight'); if(!el)return;
-  if(state.rightMode==='space'&&state.selRoom) el.innerHTML=spacePanel(spaceOf(state.selRoom));
-  else if(state.rightMode==='sensor'&&state.selSensor) el.innerHTML=sensorPanel();
+  if(rightMode()==='space'&&state.selRoom) el.innerHTML=spacePanel(spaceOf(state.selRoom));
+  else if(rightMode()==='sensor'&&state.selSensor) el.innerHTML=sensorPanel();
   else el.innerHTML=summaryPanel();
   renderMyReq();
 }
 
 export function summaryPanel(){
-  const E=ENERGY, tierPct=clamp(E.forecastKwh/400,0,1), usedDays=E.daily.filter(v=>v>0).length;
+  const E=ENERGY, tierPct=clamp(E.forecastKwh/tiersOf(NOW.m)[1].to,0,1), usedDays=E.daily.filter(v=>v>0).length;
   return `
   <div class="card">
-    <div class="ch"><span class="ct"><span class="ci">⚡</span>오늘의 전기사용량</span><span class="srcb meas">계측</span></div>
+    <div class="ch"><span class="ct"><span class="ci">⚡</span>오늘의 전기사용량</span>
+      <span><span class="srcb meas">계측</span><span class="srcb assume">가정</span></span></div>
     <div class="cb">
       <div class="bigStat"><div class="bv num">${fx(E.todayKwh)}<small>kWh</small></div>
-        <span class="pill ${E.todayKwh<4?'ok':'warn'}">${E.todayKwh<4?'절약 구간':'평균 이상'}</span></div>
+        <span class="pill ${E.todayKwh<=E.monthKwh/E.daysPassed?'ok':'warn'}">${E.todayKwh<=E.monthKwh/E.daysPassed?'일평균 이하':'일평균 초과'}</span></div>
       ${svgArea(E.hourly,300,58,'#e0a015')}
       <div class="axl"><span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>23h</span></div>
+      ${/* 덕트 공조라 냉방·환기 전력은 콘센트에 잡히지 않는다 (v0.4 2매).
+           계측분과 설비 산출분을 화면에서 구분해 둔다. */''}
+      <div class="kv" style="margin-top:10px"><span class="k">콘센트·전등 <span class="srcb meas">계측</span></span>
+        <span class="v num">${fx(E.sedKwh,2)} kWh</span></div>
+      <div class="kv"><span class="k">세대 설비 <small>덕트 공조·환기</small> <span class="srcb assume">가정</span></span>
+        <span class="v num">${fx(E.equipKwh,2)} kWh</span></div>
+      <div class="cb" style="padding:0">${E.equip.map(e=>`
+        <div class="kv"><span class="k" style="padding-left:10px">· ${e.nm} <small>${e.formula}</small></span>
+          <span class="v num" style="font-weight:600">${fx(e.kwhToday,2)} kWh</span></div>`).join('')}</div>
+      <div class="srcNote">덕트 공조 방식이라 냉방 전력이 콘센트에 잡히지 않습니다 — 설비분은 정격×가동시간 산출입니다</div>
     </div></div>
   <div class="card">
     <div class="ch"><span class="ct"><span class="ci">📅</span>이달의 전기사용량</span><span class="cx">8월 1일 ~ ${NOW.d}일</span></div>
@@ -213,7 +242,7 @@ export function summaryPanel(){
         <div class="mBox" style="height:100%"><div class="ml">누적 사용량</div>
           <div class="mv num">${fx(E.monthKwh)}<small>kWh</small></div>
           <div class="mn">지난달 같은 기간과 동일</div></div>
-        <div class="gauge">${gaugeArc(tierPct,'1단계','예상 누진')}</div>
+        <div class="gauge">${gaugeArc(tierPct,E.tier+'단계','예상 누진')}</div>
       </div>
       <div class="mGrid" style="grid-template-columns:1fr 1fr 1fr">
         <div class="mBox"><div class="ml">예상 사용량</div><div class="mv num">${fx(E.forecastKwh)}<small>kWh</small></div></div>
@@ -249,13 +278,22 @@ export function spacePanel(sp){
   const r={...sp.env, id:sp.id, nm:sp.nm, kwh:sp.kwh, icon:iconOf(sp.id), aqi:aqiOf(sp)};
   const eg=gradeOf(GRADE_E,r.kwh), cg=gradeOf(GRADE_C,r.temp), ag=gradeOf(GRADE_A,r.aqi);
   const sl=devicesOf(sp.id), onN=sl.filter(d=>d.meas.on).length;
+  const vg=tvocGradeOf(r.tvoc);
   const bar=(nm,v,mx,unit,col,note)=>`<div class="aqBar"><span class="an">${nm}</span>
     <span class="bar"><i style="width:${clamp(v/mx*100,2,100).toFixed(0)}%;background:${col}"></i></span>
     <span class="av">${v} <span style="font-weight:500;color:var(--muted2);font-size:10px">${unit}</span></span></div>
     <div style="font-size:10px;color:var(--muted2);margin:-4px 0 6px 63px">${note}</div>`;
+  /* TVOC 는 단위 미확정 — 막대·숫자 없이 등급만 표기한다 */
+  const gradeRow=(nm,g,note)=>`<div class="aqBar"><span class="an">${nm}</span>
+    <span class="bar" style="background:transparent"></span>
+    <span class="av" style="color:${g.c}">${g.k}</span></div>
+    <div style="font-size:10px;color:var(--muted2);margin:-4px 0 6px 63px">${note}</div>`;
+  const noSensor=t=>`<div class="cb" style="padding:14px 12px;text-align:center">
+    <span class="srcb none">센서 없음</span>
+    <div style="font-size:11px;color:var(--muted2);margin-top:6px">${t}</div></div>`;
   return `
   <div class="card">
-    <div class="detHead"><button class="bk" onclick="backToSummary()">←</button>
+    <div class="detHead"><button class="bk" onclick="popDetail()">←</button>
       <span class="dt2"><span class="dn">${r.icon} ${r.nm}</span>
         <span class="dd">${MYUNIT.nm} · 센서 ${sl.length}개 · ${onN}개 동작 중</span></span>
       <button class="tog ${onN?'on':''}" onclick="toggleSpacePower('${r.id}')"><span class="sw"></span>전원</button></div>
@@ -267,18 +305,22 @@ export function spacePanel(sp){
   <div class="card">
     <div class="ch"><span class="ct"><span class="ci">🌡</span>쾌적성</span>
       <span class="pill" style="background:${cg.c}1a;color:${cg.c};border-color:${cg.c}4d">${cg.k}</span></div>
+    ${r.temp==null?noSensor(`${r.nm}에 온습도 측정 기기(전등)가 없습니다`):`
     <div class="cb"><div class="mGrid">
       <div class="mBox"><div class="ml">온도</div><div class="mv num" style="color:${cg.c}">${fx(r.temp)}<small>°C</small></div><div class="mn">적정 18~26°C</div></div>
       <div class="mBox"><div class="ml">습도</div><div class="mv num">${r.humi}<small>%</small></div><div class="mn">권장 40~60%</div></div>
-    </div></div></div>
+    </div></div>`}
+    ${sp.envSrc.th?`<div class="srcNote">${sp.envSrc.th} 실측 · SED 5초 주기</div>`:''}</div>
   <div class="card">
     <div class="ch"><span class="ct"><span class="ci">💨</span>종합 공기질</span>
-      <span class="pill" style="background:${ag.c}1a;color:${ag.c};border-color:${ag.c}4d">${ag.k} · ${r.aqi}</span></div>
+      <span class="pill" style="background:${ag.c}1a;color:${ag.c};border-color:${ag.c}4d">${ag.k}${r.aqi==null?'':' · '+r.aqi}</span></div>
+    ${r.aqi==null?noSensor(`${r.nm}에 공기질 측정 기기(스위치)가 없습니다`):`
     <div class="cb">
       ${bar('PM2.5',fx(r.pm25),35,'㎍/㎥',r.pm25<=15?'#1a9c6a':r.pm25<=35?'#e08a12':'#d64545', r.pm25<=15?'정상 범위':'권장 상한 35 접근')}
       ${bar('CO₂',r.co2,1500,'ppm',r.co2<=800?'#1a9c6a':r.co2<=1000?'#e08a12':'#d64545', r.co2<=800?'정상 범위':'높음 · 환기 권장 (기준 800)')}
-      ${bar('TVOC',r.tvoc,400,'ppb',r.tvoc<=200?'#1a9c6a':r.tvoc<=400?'#e08a12':'#d64545', r.tvoc<=200?'정상 범위':'기준 400ppb 접근')}
-    </div></div>
+      ${gradeRow('TVOC',vg,'단위 확정 대기 — 등급만 표기')}
+    </div>`}
+    ${sp.envSrc.aq?`<div class="srcNote">${sp.envSrc.aq} 실측 · SED 5초 주기</div>`:''}</div>
   <div class="card">
     <div class="ch"><span class="ct"><span class="ci">📡</span>영역 센서</span><span class="cx">${sl.length}개</span></div>
     <div class="cb">${sl.map(d=>`
@@ -295,54 +337,94 @@ export function spacePanel(sp){
 
 export function toggleSpacePower(rid){
   const sl=devicesOf(rid), anyOn=sl.some(d=>d.meas.on);
-  sl.forEach(d=>{if(d.type!=='SEA')d.meas.on=!anyOn;});
+  /* 전등·스위치가 환경을 측정하므로 전원과 무관하게 측정값은 유지된다 */
+  sl.forEach(d=>{d.meas.on=!anyOn;});
   renderPlan();renderRight();
-  toast(`${spaceOf(rid).nm} 전체 ${anyOn?'OFF':'ON'} — 환경센서는 항상 동작합니다`);
+  toast(`${spaceOf(rid).nm} 전체 ${anyOn?'OFF':'ON'}`);
+}
+
+/* 그 기기가 SED 규격상 보고하는 항목을 사람이 읽는 이름으로 (TEL 번호 병기) */
+const MEAS_LABEL={w:'순간 전력(0)', kwhToday:'소비 전력(1)', temp:'온도(2)', humi:'습도(3)',
+  pressure:'기압(4)', co2:'CO₂(6)', tvoc:'TVOC(5)', pm25:'먼지(7)',
+  occupied:'재실(10)', leak:'누전(12)', plugMode:'콘센트 모드(15)'};
+const ON_LABEL={SEL:'조명 상태(9)', SES:'스위치 상태(11)', SEO:'콘센트 상태(13)', SEC:'개폐 상태(33)'};
+export function measLabels(s){
+  return (MEASURES[s.type]||[]).map(k=>k==='on'?ON_LABEL[s.type]:MEAS_LABEL[k])
+    .filter(Boolean).join(' · ')||'제어 전용';
 }
 
 export function sensorPanel(){
   const rid=state.selRoom, s=devicesOf(rid).find(x=>x.id===state.selSensor);
   if(!s)return summaryPanel();
-  const d=sensorReading(s.id), ty=STYPE[s.type];
+  const d=sensorReading(s.id), ty=STYPE[s.type], sp=spaceOf(rid), vg=tvocGradeOf(d.tvoc);
   const N=state.sensorPeriod==='R'?12:state.sensorPeriod==='D'?24:state.sensorPeriod==='W'?7:30;
-  const gen=(base,amp,seed)=>Array.from({length:N},(_,i)=>+(base+Math.sin(i/N*6.1+seed)*amp+(rnd(i+seed*7)-0.5)*amp*0.7).toFixed(2));
+  const gen=(base,amp,seed)=>base==null?null
+    :Array.from({length:N},(_,i)=>+(base+Math.sin(i/N*6.1+seed)*amp+(rnd(i+seed*7)-0.5)*amp*0.7).toFixed(2));
   const tS=gen(d.tempAvg,2.4,3), hS=gen(d.humiAvg,7,9), vS=gen(d.tvocAvg,38,13),
         cS=gen(d.co2Avg,120,17), pS=gen(d.pm25Avg,2.2,21);
+  const noSensor=t=>`<div style="padding:14px 0;text-align:center">
+    <span class="srcb none">센서 없음</span>
+    <div style="font-size:11px;color:var(--muted2);margin-top:6px">${t}</div></div>`;
   const per=()=>`<span class="seg mini">${['R','D','W','M'].map(x=>
     `<button class="${state.sensorPeriod===x?'on':''}" onclick="setPeriod('${x}')">${x}</button>`).join('')}</span>`;
   return `
   <div class="card">
-    <div class="detHead"><button class="bk" onclick="backToSpace()">←</button>
+    <div class="detHead"><button class="bk" onclick="popDetail()">←</button>
       <span class="dt2"><span class="dn">${ty.icon} ${ty.nm}</span>
         <span class="dd">${s.id} · ${spaceOf(rid).nm} · ${s.nm}</span></span>
       <button class="tog ${s.meas.on?'on':''}" onclick="toggleSensor('${s.id}')"><span class="sw"></span>${s.meas.on?'ON':'OFF'}</button></div>
     <div class="cb">
-      <div class="sec">실시간 측정값 <span class="srcb meas">계측</span></div>
-      <div class="mGrid" style="grid-template-columns:1fr 1fr 1fr">
-        <div class="mBox"><div class="ml">TVOC</div><div class="mv num">${fx(d.tvoc)}</div><div class="mn">ppb</div></div>
-        <div class="mBox"><div class="ml">CO₂</div><div class="mv num">${fx(d.co2,2)}</div><div class="mn">ppm</div></div>
-        <div class="mBox"><div class="ml">미세먼지</div><div class="mv num">${fx(d.pm25,2)}</div><div class="mn">㎍/㎥</div></div>
-      </div>
-      ${s.type!=='SEA'?`<div class="kv" style="margin-top:10px"><span class="k">현재 소비전력</span>
-        <span class="v num">${s.meas.on?fx(s.meas.w,1):'0.0'} W</span></div>`:''}
-      <div class="kv"><span class="k">설치 공간</span><span class="v" style="font-weight:600">${spaceOf(rid).nm}</span></div>
+      ${/* 이 기기가 SED 규격상 직접 보고하는 항목만 보여준다.
+           공간 단위 값(다른 기기가 잰 값)은 아래 차트에서 「공간 기준」으로 구분한다. */''}
+      <div class="sec">이 기기 측정값 <span class="srcb meas">계측</span>
+        <span class="cx" style="font-weight:600">${ty.k}</span></div>
+      ${(()=>{
+        const own=s.meas, box=(l,v,u)=>`<div class="mBox"><div class="ml">${l}</div>
+          <div class="mv num">${v}</div><div class="mn">${u}</div></div>`;
+        const b=[];
+        if(own.temp!=null)  b.push(box('온도',fx(own.temp),'°C'));
+        if(own.humi!=null)  b.push(box('습도',own.humi,'%'));
+        if(own.co2!=null)   b.push(box('CO₂',own.co2,'ppm'));
+        if(own.pm25!=null)  b.push(box('미세먼지',fx(own.pm25,1),'㎍/㎥'));
+        if(own.tvoc!=null)  b.push(`<div class="mBox"><div class="ml">TVOC</div>
+          <div class="mv" style="font-size:15px;font-weight:700;color:${tvocGradeOf(own.tvoc).c}">${tvocGradeOf(own.tvoc).k}</div>
+          <div class="mn">단위 확정 대기</div></div>`);
+        return b.length
+          ? `<div class="mGrid" style="grid-template-columns:repeat(${Math.min(b.length,3)},1fr)">${b.join('')}</div>`
+          : `<div style="padding:10px 0;text-align:center;font-size:11px;color:var(--muted2)">이 기기는 환경값을 측정하지 않습니다 — 제어 전용</div>`;
+      })()}
+      ${/* 규격상 이 기기가 보고하는 항목만 행으로 만든다 (SED 열 기준) */''}
+      ${s.meas.w!==undefined?`<div class="kv" style="margin-top:10px"><span class="k">현재 소비전력 <span class="srcb meas">계측</span></span>
+        <span class="v num">${s.meas.on?fx(s.meas.w,1):'0.0'} W</span></div>`
+      :`<div class="kv" style="margin-top:10px"><span class="k">현재 소비전력</span>
+        <span class="v" style="color:var(--muted2)">규격 미제공
+          <small>${s.type==='SEC'?'커튼 서버 경유 — 전력 항목 없음':'스위치는 전력 미보고'}</small></span></div>`}
+      ${s.meas.pressure!=null?`<div class="kv"><span class="k">실내 기압 <span class="srcb meas">계측</span></span>
+        <span class="v num">${(s.meas.pressure/100).toFixed(1)} hPa</span></div>`:''}
+      ${s.meas.leak!=null?`<div class="kv"><span class="k">누전 감지 <span class="srcb meas">계측</span></span>
+        <span class="v"><span class="pill ${s.meas.leak?'danger dot':'ok dot'}">${s.meas.leak?'감지':'정상'}</span></span></div>`:''}
+      <div class="kv"><span class="k">설치 공간</span><span class="v" style="font-weight:600">${sp.nm}</span></div>
+      <div class="kv"><span class="k">측정 항목 <small>SED 규격</small></span><span class="v">${measLabels(s)}</span></div>
     </div></div>
   <div class="card"><div class="ch"><span class="ct"><span class="ci">${ty.icon}</span>기기 제어</span>
       <span class="cx">${ty.nm} · ${s.id}</span></div>
     <div class="cb" style="text-align:center">${deviceControl(s)}</div></div>
   <div class="card"><div class="cb">
-    <div class="chartHead"><span class="cht">온습도</span>${per()}</div>
-    <div class="chartVals"><div>현재 온도<b>${fx(d.temp)}°C</b></div><div>현재 습도<b>${fx(d.humi)}%</b></div>
+    <div class="chartHead"><span class="cht">온습도 <small style="font-weight:500;color:var(--muted2)">공간 기준</small></span>${per()}</div>
+    ${d.hasTh?`<div class="chartVals"><div>현재 온도<b>${fx(d.temp)}°C</b></div><div>현재 습도<b>${fx(d.humi)}%</b></div>
       <div>평균 온도<b>${fx(d.tempAvg)}°C</b></div><div>평균 습도<b>${fx(d.humiAvg)}%</b></div></div>
-    ${svgMulti([{v:tS,c:'#d64545'},{v:hS,c:'#0877ed'}],300,72)}</div></div>
+    ${svgMulti([{v:tS,c:'#d64545'},{v:hS,c:'#0877ed'}],300,72)}`
+    :noSensor(`${sp.nm}에 온습도 측정 기기(전등)가 없습니다`)}</div></div>
   <div class="card"><div class="cb">
-    <div class="chartHead"><span class="cht">TVOC</span>${per()}</div>
-    <div class="chartVals"><div>현재값<b>${fx(d.tvoc)} ppb</b></div><div>평균값<b>${fx(d.tvocAvg)} ppb</b></div></div>
-    ${svgArea(vS,300,64,'#6b57d6')}</div></div>
+    <div class="chartHead"><span class="cht">TVOC <small style="font-weight:500;color:var(--muted2)">공간 기준</small></span>${per()}</div>
+    ${d.hasAq?`<div class="chartVals"><div>현재 등급<b style="color:${vg.c}">${vg.k}</b></div><div>단위<b>확정 대기</b></div></div>
+    ${svgArea(vS,300,64,'#6b57d6')}`
+    :noSensor(`${sp.nm}에 공기질 측정 기기(스위치)가 없습니다`)}</div></div>
   <div class="card"><div class="cb">
-    <div class="chartHead"><span class="cht">공기질</span>${per()}</div>
-    <div class="chartVals"><div>CO₂<b>${fx(d.co2,2)} ppm</b></div><div>PM2.5<b>${fx(d.pm25,2)} ㎍/㎥</b></div></div>
-    ${svgMulti([{v:cS,c:'#e08a12'},{v:pS.map(v=>v*40),c:'#0f9b9b'}],300,72)}</div></div>`;
+    <div class="chartHead"><span class="cht">공기질 <small style="font-weight:500;color:var(--muted2)">공간 기준</small></span>${per()}</div>
+    ${d.hasAq?`<div class="chartVals"><div>CO₂<b>${fx(d.co2,2)} ppm</b></div><div>PM2.5<b>${fx(d.pm25,2)} ㎍/㎥</b></div></div>
+    ${svgMulti([{v:cS,c:'#e08a12'},{v:pS.map(v=>v*40),c:'#0f9b9b'}],300,72)}`
+    :noSensor(`${sp.nm}에 공기질 측정 기기(스위치)가 없습니다`)}</div></div>`;
 }
 
 export function setPeriod(p){state.sensorPeriod=p;renderRight();}
@@ -358,29 +440,61 @@ export function toggleSensor(sid){
 export function deviceControl(s){
   const sid=s.id;
   if(state.devState[sid]===undefined)
-    state.devState[sid]=DEV_CTRL_INIT[sid]!==undefined?DEV_CTRL_INIT[sid]:(s.meas.on?100:0);
+    state.devState[sid]=DEV_CTRL_INIT[sid]!==undefined?DEV_CTRL_INIT[sid]
+      :(s.type==='SEC' ? (s.meas.on?0:100)          // 커튼: 열림=0 (SED TEL 33)
+                       : (s.meas.on?100:0));
   const pct=state.devState[sid];
-  const modeOf=p=>p>=95?'완전개방':p<=5?'닫힘':p>=45&&p<=55?'분할개방':'부분개방';
-  const isBlind=s.type==='SEC', isDim=s.type==='SEL', isSensor=s.type==='SEA';
-  if(isSensor)return `<div class="empty" style="text-align:left">환경센서는 항상 동작하며 제어 대상이 아닙니다</div>`;
+  /* SED 규격 TEL 33 CURTAIN_STS : 0.0 = 완전 열림 · 100.0 = 완전 닫힘.
+     이전 코드는 0=닫힘 / 100=완전개방으로 반대였다 (단계: 커튼 버그 수정).
+     따라서 「▲ 올림」(=열기)은 0 을, 「▼ 내림」(=닫기)은 100 을 보낸다.       */
+  const modeOf=p=>p<=5?'완전개방':p>=95?'닫힘':p>=45&&p<=55?'분할개방':'부분개방';
+  const isBlind=s.type==='SEC', isDim=s.type==='SEL';
   return `
     <div class="devMode">${isBlind?modeOf(pct):isDim?'밝기':'전원 상태'}</div>
     <div class="devPct">${isBlind||isDim?pct+'%':(s.meas.on?'ON':'OFF')}</div>
+    ${isBlind?`<div class="devScale"><span>0 완전열림</span><span>100 완전닫힘</span></div>`:''}
     ${isBlind||isDim?`<input class="devSlider" type="range" min="0" max="100" value="${pct}" oninput="devSet('${sid}',this.value)">`:''}
     ${isBlind?`<div class="devBtns">
-        <button onclick="devSet('${sid}',100)">▲ 올림</button>
+        <button onclick="devSet('${sid}',0)">▲ 올림 <small>열기</small></button>
         <button onclick="devStop('${sid}')">■ 정지</button>
-        <button onclick="devSet('${sid}',0)">▼ 내림</button></div>`
+        <button onclick="devSet('${sid}',100)">▼ 내림 <small>닫기</small></button></div>`
      :`<div class="devBtns" style="grid-template-columns:1fr 1fr">
         <button onclick="devPower('${sid}',true)" style="${s.meas.on?'border-color:var(--blue);color:var(--blue);background:var(--blue-soft)':''}">ON</button>
         <button onclick="devPower('${sid}',false)" style="${!s.meas.on?'border-color:var(--danger);color:var(--danger);background:var(--danger-soft)':''}">OFF</button></div>`}
+    ${/* TEL 15 콘센트 모드 — 콘센트만 보유 (재실 1.0 / 상시 2.0 / CO2 3.0) */''}
+    ${s.meas.plugMode!==undefined?`
+      <div class="kv" style="margin-top:14px"><span class="k">동작 모드 <small>SED TEL 15</small></span>
+        <span class="v"><span class="seg mini">${PLUG_MODES.map(m=>
+          `<button class="${s.meas.plugMode===m?'on':''}" onclick="devMode('${sid}','${m}')">${m}</button>`).join('')}</span></span></div>`:''}
+    ${/* 커튼은 5초 자동 갱신이 아니라 요청-응답이다 (TEL 32 STS_REQ · TEL 31 HB 20초) */''}
+    ${isBlind?`
+      <div class="kv" style="margin-top:14px"><span class="k">상태 갱신 <small>요청 시에만 응답</small></span>
+        <span class="v"><button class="btn sm" onclick="curtainRefresh('${sid}')">↻ 상태 새로고침</button></span></div>
+      <div class="kv"><span class="k">커튼 서버 연결 <small>20초 하트비트</small></span>
+        <span class="v"><span class="pill ok dot">정상</span></span></div>
+      <div class="srcNote" style="text-align:left">커튼은 별도 서버 경유라 실시간 자동 갱신이 아닙니다 — 마지막 응답 ${TIMETXT} 기준</div>`:''}
     <div class="kv" style="margin-top:14px"><span class="k">제어 방식 <small>FR-SIM-10 가드레일 적용</small></span>
       <span class="v" style="font-weight:600">수동 · 즉시</span></div>`;
 }
 
+/* TEL 15 콘센트 모드 변경 */
+export function devMode(sid,m){
+  const s=devicesOf(state.selRoom).find(x=>x.id===sid); if(!s)return;
+  s.meas.plugMode=m; renderRight(); toast(`${s.nm} 동작 모드 ${m}`);
+}
+
+/* TEL 32 CURTAIN_STS_REQ — 상태를 요청해야 응답이 온다 */
+export function curtainRefresh(sid){
+  const s=devicesOf(state.selRoom).find(x=>x.id===sid); if(!s)return;
+  renderRight();
+  toast(`${s.nm} 상태 요청 — 커튼 서버 응답 대기 (자동 갱신 아님)`);
+}
+
 export function devSet(sid,v){
   state.devState[sid]=+v; const s=devicesOf(state.selRoom).find(x=>x.id===sid);
-  if(s)s.meas.on=+v>0;                 // 조광·개폐율은 devState 에만 보관
+  /* 조광·개폐율은 devState 에만 보관.
+     커튼(SEC)은 0=완전열림이므로 on(열림) 판정이 조광과 반대다 (SED TEL 33) */
+  if(s)s.meas.on = s.type==='SEC' ? (+v<95) : (+v>0);
   renderPlan(); renderRight();
 }
 
@@ -513,7 +627,7 @@ export function pgEnvpred(){
     <div class="cb"><div class="g3">${RISKS.map(k=>`
       <div style="border:1px solid var(--line);border-radius:var(--r-m);padding:12px 13px">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <span style="font-size:13px;font-weight:800">${k.nm}</span>
+          <span style="font-size:13px;font-weight:800">${k.nm} <span class="srcb calcwait">산출 예정</span></span>
           <span class="pill" style="background:${k.c}1a;color:${k.c};border-color:${k.c}4d">${k.grade}</span></div>
         <div style="display:flex;align-items:center;gap:9px;margin:9px 0">
           <span class="bar" style="flex:1"><i style="width:${k.score}%;background:${k.c}"></i></span>
@@ -521,6 +635,7 @@ export function pgEnvpred(){
         <div style="font-size:11px;color:var(--muted);line-height:1.6">${k.sp} · ${k.why}</div>
         <div style="font-size:11px;margin-top:7px;padding:8px 10px;background:var(--blue-soft);border-radius:var(--r-s);border:1px solid var(--blue-line)">
           <b style="color:var(--blue)">권고</b> ${k.rec}</div></div>`).join('')}</div>
+      <div class="srcNote">온도·습도 계측값 기반, 계산식은 확정 대기</div>
       <div style="font-size:10.5px;color:var(--muted2);margin-top:12px;line-height:1.6">${P.note}</div>
     </div></div>`;
 }
@@ -576,7 +691,7 @@ export function pgEnergyRes(){
     <div class="kpi"><div class="kl2">이달 누적</div><div class="kv2 num">${fx(E.monthKwh)}<small>kWh</small></div>
       <div class="ks">지난달 동기간과 동일</div></div>
     <div class="kpi ok"><div class="kl2">예상 사용량</div><div class="kv2 num">${fx(E.forecastKwh)}<small>kWh</small></div>
-      <div class="ks">누진 ${E.tier}단계 이내</div></div>
+      <div class="ks">하계 누진 ${E.tier}단계</div></div>
     <div class="kpi ok"><div class="kl2">예상 전기료</div><div class="kv2 num">${won(E.forecastWon)}<small>원</small></div>
       <div class="ks">1단계 120.0원/kWh</div></div>
   </div>
@@ -625,8 +740,8 @@ export function pgScenario(){
         <span class="sd2">${s.d}</span>
         <span class="sg3">
           <div>월 절감<b>${fx(s.save)} kWh</b></div>
-          <div>월 절약<b>${won(s.won)}원</b></div>
-          <div>회수 기간<b>${s.pay?s.pay+'개월':'즉시'}</b></div>
+          <div>월 절약<b>${s.overLife?'—':won(s.won)+'원'}</b></div>
+          <div>회수 기간<b>${s.overLife?'수명 초과':(s.pay?s.pay+'개월':'즉시')}</b></div>
         </span></button>`).join('')}</div></div>
     <div class="card"><div class="ch"><span class="ct"><span class="ci">📊</span>시나리오 비교</span></div>
       <div class="cb">
@@ -637,11 +752,14 @@ export function pgScenario(){
         <div class="sec" style="margin-top:16px">선택 시나리오</div>
         <div class="mBox"><div class="ml">${sel.nm}</div>
           <div class="mv num" style="color:var(--ok)">−${fx(sel.save)}<small>kWh/월</small></div>
-          <div class="mn">연간 ${fx(sel.save*12)} kWh · ${won(sel.won*12)}원</div></div>
+          <div class="mn">연간 ${fx(sel.save*12)} kWh${sel.overLife?'':' · '+won(sel.won*12)+'원'}</div></div>
         <div class="kv" style="margin-top:10px"><span class="k">난이도</span><span class="v">${sel.diff}</span></div>
         <div class="kv"><span class="k">효과 발생</span><span class="v">${sel.eff}</span></div>
+        <div class="kv"><span class="k">적용 단가 <small>누진 ${ENERGY.tier}단계 한계</small></span><span class="v num">${fx(sel.marginal,1)} 원/kWh</span></div>
         <div class="kv"><span class="k">투자 비용</span><span class="v num">${sel.cost?won(sel.cost)+'원':'없음'}</span></div>
-        <div class="kv"><span class="k">회수 기간</span><span class="v">${sel.pay?sel.pay+'개월':'즉시'}</span></div>
+        <div class="kv"><span class="k">회수 기간</span><span class="v">${sel.pay?sel.pay+'개월':'즉시'}${sel.life?' <small>· 수명 '+sel.life+'개월</small>':''}</span></div>
+        ${sel.note?'<div class="empty" style="text-align:left;margin-top:10px;border-color:#f5dcae;background:var(--warn-soft)">'+
+          '<b>'+sel.note+'</b><br><span style="font-size:10.5px">회수기간이 설비 수명을 초과해 금액 대신 쾌적 개선 효과로 평가합니다 (규칙 §9)</span></div>':''}
         <button class="btn blue" style="width:100%;margin-top:12px" onclick="applyScenario('${sel.id}')">이 시나리오 적용 요청</button>
         <div style="font-size:10px;color:var(--muted2);margin-top:9px;line-height:1.6">
           절감량은 최근 12개월 사용 패턴 기반 <b>추정치</b>입니다. 실제 효과는 생활 패턴·외기 조건에 따라 달라집니다.</div>
@@ -997,4 +1115,4 @@ export function openReport(){
 }
 
 /* 인라인 핸들러가 참조하는 심볼을 window 에 등록 (동작 유지) */
-Object.assign(window,{pgHome,setPlanTab,setPlanMode,renderPlanLegend,tgSenior,tgAway,renderMyReq,roomPaint,renderPlan,selectRoom,backToSummary,backToSpace,selectSensor,renderRight,summaryPanel,setOutletTab,spacePanel,toggleSpacePower,sensorPanel,setPeriod,toggleSensor,deviceControl,devSet,devStop,devPower,pgRoadmap,pgMaterial,pgPipe,tgPipe,renderPipe,pgEnvpred,pgNeighbor,pgEnergyRes,pgScenario,applyScenario,pgLifespan,pgHistory,pgRemodel,pgTransfer,genTransfer,pgRequest,pgReqstat,renderReqForm,renderReqPlan,submitReq,openMyReq,rateReq,reopenReq,openReport});
+Object.assign(window,{pgHome,setPlanTab,setPlanMode,renderPlanLegend,tgSenior,tgAway,renderMyReq,roomPaint,renderPlan,selectRoom,selectSensor,renderRight,summaryPanel,setOutletTab,spacePanel,toggleSpacePower,sensorPanel,setPeriod,toggleSensor,deviceControl,devSet,devStop,devPower,devMode,curtainRefresh,measLabels,pgRoadmap,pgMaterial,pgPipe,tgPipe,renderPipe,pgEnvpred,pgNeighbor,pgEnergyRes,pgScenario,applyScenario,pgLifespan,pgHistory,pgRemodel,pgTransfer,genTransfer,pgRequest,pgReqstat,renderReqForm,renderReqPlan,submitReq,openMyReq,rateReq,reopenReq,openReport});

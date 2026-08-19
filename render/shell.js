@@ -1,14 +1,15 @@
 /* BEES Home v0.9 · render/shell.js — 공용 셸 · 라우팅 · 드로어 · AI 패널 · 모달
    pages/* 와 순환 import 관계다. 서로 참조하는 심볼이 모두 함수 선언이라
    호이스팅으로 안전하며, 최상위에서 호출하는 코드는 index.html 에만 둔다. */
-import {AIQ,BOOT_MSGS,NAVG,PAGES,RBAC,ROLES} from '../data/const.js';
-import {$,COMMON,COMPLEX,ENVSYS,UNIT_REF,app,fx,spaceOf,won} from '../data/module.js';
+import {AIQ,BOOT_MSGS,NAVG,PAGES,ROLES,allowedPages,landingPage} from '../data/const.js';
+import {$,COMMON,COMPLEX,ENVSYS,UNIT_REF,app,aqiOf,deviceOf,devicesOf,fx,spaceOf,won} from '../data/module.js';
 import {MODULE} from '../data/moduleUnit.js';
-import {ALARMS,COSTS,NEIGHBOR,NOTI,RECS,REQUESTS,SAFETY,WORKORDERS} from '../data/ops.js';
+import {ALARMS,COSTS,ENERGY,NEIGHBOR,NOTI,RECS,REQUESTS,SAFETY,WORKORDERS} from '../data/ops.js';
 import {state} from '../data/state.js';
 import {clearDetail,detailDepth,popDetail} from './detail.js';
 import {myWos,pgAlarm,pgAudit,pgDash,pgEnergy8,pgMap,pgRec,pgReport,pgReq,pgSafety,pgWork,renderPartner} from '../pages/admin.js';
-import {backToSummary,pgEnergyRes,pgEnvpred,pgHistory,pgHome,pgLifespan,pgMaterial,pgNeighbor,pgPipe,pgRemodel,pgReqstat,pgRequest,pgRoadmap,pgScenario,pgTransfer,renderPipe,renderPlan,renderReqForm,renderReqPlan,renderRight,selectRoom} from '../pages/resident.js';
+import {pgSimulator} from '../pages/simulator.js';
+import {pgEnergyRes,pgEnvpred,pgHistory,pgHome,pgLifespan,pgMaterial,pgNeighbor,pgPipe,pgRemodel,pgReqstat,pgRequest,pgRoadmap,pgScenario,pgTransfer,renderPipe,renderPlan,renderReqForm,renderReqPlan,renderRight,selectRoom} from '../pages/resident.js';
 
 /* ══════════════════════════════════════════════════════════════════
    부팅 · 로그인 · 역할
@@ -59,8 +60,8 @@ export function setRole(r){
   $('shell').classList.toggle('hidden',isMob);
   $('mobWrap').classList.toggle('hidden',!isMob);
   if(isMob){renderPartner();return;}
-  const allow=RBAC[r]||[];
-  if(!allow.includes(state.page))state.page=allow[0];
+  /* 역할이 바뀌면 현재 화면이 그 역할 범위 밖일 수 있다 — 진입 화면으로 되돌린다 */
+  if(!allowedPages(r).includes(state.page))state.page=landingPage(r);
   renderSideNav(); renderPage();
 }
 
@@ -88,13 +89,38 @@ export function renderSideNav(){
 /* 페이지를 옮기면 상세 스택은 비운다 (같은 정보에 진입 경로를 남기지 않는다) */
 export function goPage(k){clearDetail();state.page=k;renderSideNav();renderPage();$('mainArea').scrollTop=0;}
 
+/* ══════════ T3 화면 수치 제거 (규칙 §7 · 단계 8 수정 8) ══════════════
+   T3 는 로드맵 구상 단계다. 근거 없는 수치가 데모에서 반박당하는 것을 막기 위해
+   구조와 항목명만 남기고 숫자·단위·금액을 표시하지 않는다.
+   · 태그와 속성은 건드리지 않는다 (style·viewBox·fill 이 깨지면 레이아웃이 무너진다)
+   · 화면·설비 식별 코드(HM-08, SCR-13, SEO_36 …)는 항목명이므로 보존한다
+   · 'roadmap' 은 Phase 배지가 화면의 본체라 대상에서 제외한다 (T3 8개 목록 밖)   */
+const T3_STRIP=['lifespan','material','pipe','history','remodel','transfer','safety','audit'];
+const CODE_RE=/\b(?:HM|SCR|RM|AL|REQ|WO|RC|SF|CAM|IF|EV|AHU|EHP|ERV|ACS|FD|DR|FH|LED|GW|WS|P|MOD|G)[-_][\w.-]+/g;
+const NUM_UNIT_RE=/\d[\d,.]*\s*(?:kWh|kW|W\b|℃|°C|%|㎥\/h|㎥|㎡|ppm|ppb|㎍\/㎥|만원|천원|원|개월|개소|시간|년|일|건|기|개|회|h\b|T\b|mm|m\b|σ|bar|점)/g;
+/* 플레이스홀더에 숫자를 쓰면 뒤이은 숫자 제거 단계가 그것까지 지워
+   식별 코드가 복원되지 않는다. 그래서 영문자만으로 인코딩한다. */
+const PH_A='ABCDEFGHIJ';                              // 자리수 0~9 → A~J
+const phEnc=i=>'\u0001'+String(i).replace(/\d/g,d=>PH_A[+d])+'\u0001';
+export function stripT3Numbers(html){
+  return html.split(/(<[^>]*>)/).map(part=>{
+    if(part.charAt(0)==='<')return part;                 // 태그·속성 보존
+    const keep=[];
+    let t=part.replace(CODE_RE,m=>{keep.push(m);return phEnc(keep.length-1);});
+    t=t.replace(NUM_UNIT_RE,'—').replace(/\d[\d,.]*/g,'—').replace(/—(?:\s*[·~/-]\s*—)+/g,'—');
+    return t.replace(/\u0001([A-J]+)\u0001/g,(m,c)=>keep[+c.replace(/[A-J]/g,ch=>PH_A.indexOf(ch))]);
+  }).join('');
+}
+
 export function renderPage(){
   const p=PAGES[state.page]; if(!p)return;
   const M=$('mainArea');
   M.className='mainArea '+(p.full?'full':'pad');
-  M.innerHTML=(PAGEFN[state.page]||(()=>'<div class="empty">준비 중</div>'))();
+  let html=(PAGEFN[state.page]||(()=>'<div class="empty">준비 중</div>'))();
+  if(T3_STRIP.includes(state.page))html=stripT3Numbers(html);
+  M.innerHTML=html;
   if(state.page==='home'){renderPlan();renderRight();}
-  if(state.page==='pipe')renderPipe();
+  if(state.page==='pipe'){renderPipe();const sv=$('pipeSvg'); if(sv)sv.innerHTML=stripT3Numbers(sv.innerHTML);}
   if(state.page==='request'){renderReqForm();renderReqPlan();}
 }
 
@@ -124,7 +150,7 @@ export function renderEnvStrip(){
 export const PAGEFN={
   roadmap:pgRoadmap,
   home:pgHome, material:pgMaterial, pipe:pgPipe, envpred:pgEnvpred, neighbor:pgNeighbor,
-  energy:pgEnergyRes, scenario:pgScenario, request:pgRequest, reqstat:pgReqstat,
+  energy:pgEnergyRes, scenario:pgScenario, simulator:pgSimulator, request:pgRequest, reqstat:pgReqstat,
   lifespan:pgLifespan, history:pgHistory, remodel:pgRemodel, transfer:pgTransfer,
   dash:pgDash, map:pgMap, alarm:pgAlarm, req:pgReq, work:pgWork,
   energy8:pgEnergy8, report:pgReport, rec:pgRec, safety:pgSafety, audit:pgAudit,
@@ -190,13 +216,61 @@ export function renderAi(){
   $('aiBody').scrollTop=9e9;
 }
 
-export function ask(q){state.chatLog.push({r:'me',t:q});state.chatLog.push({r:'ai',t:aiReply(q)});renderAi();}
+/* 현재 화면 컨텍스트 — 질문 시점의 화면·선택 상태를 그대로 넘긴다 */
+export function aiCtx(){
+  return {page:state.page, selRoom:state.selRoom, selSensor:state.selSensor, viewMode:state.planMode};
+}
+
+export function ask(q){state.chatLog.push({r:'me',t:q});state.chatLog.push({r:'ai',t:aiReply(q,aiCtx())});renderAi();}
 
 export function sendAsk(){const v=$('aiInput').value.trim();if(!v)return;$('aiInput').value='';ask(v);}
 
-export function aiReply(q){
+export function aiReply(q,ctx=aiCtx()){
   const s=q.toLowerCase();
+  /* 선택된 공간이 있으면 그 공간을 기준으로 답한다. 없으면 기존대로 거실 기준.
+     공간 선택은 HM-01 도면에만 있으므로, 다른 화면으로 넘어간 뒤 남은
+     selRoom 값으로 엉뚱하게 답하지 않도록 page 로 한 번 더 막는다.        */
+  const sp=(ctx.page==='home'&&ctx.selRoom&&spaceOf(ctx.selRoom))||null;
+  const dv=(ctx.selSensor&&deviceOf(ctx.selSensor))||null;
+  /* 컨텍스트 머리말 — 무엇을 보고 답하는지 먼저 밝힌다 */
+  const head=sp
+    ? `<span class="srcb meas">${PAGES[ctx.page]?PAGES[ctx.page].c:ctx.page}</span> <b>${sp.nm}</b> 선택 중${
+        dv?` · ${dv.nm} <span style="font-family:monospace">${dv.id}</span>`:''}${
+        ctx.viewMode?` · ${ctx.viewMode.toUpperCase()} 도면`:''}<br><br>`
+    : '';
+  /* 선택 공간 기준 환경 요약 — 측정원 없는 항목은 '센서 없음' 으로 답한다 */
+  if(sp){
+    const e=sp.env, aq=aqiOf(sp);
+    const tTxt=e.temp==null?'센서 없음':`<b>${e.temp}℃</b>`;
+    const hTxt=e.humi==null?'센서 없음':`${e.humi}%`;
+    const aTxt=aq==null?'공기질 센서 없음 (이 공간에 스위치 미설치)':`종합지수 <b>${aq}</b> · CO₂ ${e.co2}ppm`;
+    const dl=devicesOf(sp.id);
+    if(s.includes('더워')||s.includes('온도')||s.includes('쾌적')){
+      /* 조치 제안은 그 공간에 실제로 있는 기기만 언급한다 */
+      const blind=devicesOf(sp.id).find(d=>d.type==='SEC');
+      const acts=[blind?`전동커튼 <span style="font-family:monospace">${blind.id}</span> 폐쇄`:null,'취침 2시간 전 선제 냉방']
+                 .filter(Boolean).map(a=>'· '+a).join('<br>');
+      return head+`<b>${sp.nm}</b> 현재 온도는 ${tTxt}, 습도 ${hTxt}입니다.<br><br>`+
+        (e.temp==null?'이 공간에는 온습도 측정 기기(전등)가 없습니다.'
+         :e.temp>26?`재실 냉방 상한 <b>26℃</b>를 <b>+${(e.temp-26).toFixed(1)}℃</b> 초과했습니다.<br>${acts}`
+                   :'적정 범위 안입니다.')+
+        `<br><br>측정원 ${sp.envSrc.th?`<span style="font-family:monospace">${sp.envSrc.th}</span>`:'없음'}`;
+    }
+    if(s.includes('공기')||s.includes('환기')||s.includes('co2')||s.includes('먼지'))
+      return head+`<b>${sp.nm}</b> 공기질은 ${aTxt}입니다.<br><br>`+
+        (aq==null?'CO₂·미세먼지·TVOC 는 스위치(SES)가 측정합니다. 이 공간에는 해당 기기가 없어 값을 표시하지 않습니다.'
+                 :aq>=50?'환기 30분 또는 환기 유닛 급기량 2단계를 권장합니다.':'현재는 조치가 필요하지 않습니다.');
+    if(s.includes('전기')||s.includes('요금')||s.includes('사용량'))
+      return head+`<b>${sp.nm}</b> 최근 24시간 사용량은 <b>${fx(sp.kwh,2)}kWh</b>입니다.<br><br>`+
+        dl.filter(d=>d.meas.kwhToday>0).sort((a,b)=>b.meas.kwhToday-a.meas.kwhToday).slice(0,3)
+          .map(d=>`· ${d.nm} <b>${fx(d.meas.kwhToday,2)}kWh</b>`).join('<br>')+
+        `<br><br>유닛 전체는 ${fx(ENERGY.todayKwh,2)}kWh 입니다.`;
+    if(s.includes('기기')||s.includes('센서')||s.includes('디바이스'))
+      return head+`<b>${sp.nm}</b>에 기기 <b>${dl.length}개</b>가 있고 <b>${dl.filter(d=>d.meas.on).length}개</b>가 동작 중입니다.<br><br>`+
+        dl.map(d=>`· ${d.nm} <span style="font-family:monospace">${d.id}</span> — ${d.meas.on?'ON':'OFF'}`).join('<br>');
+  }
   if(state.role==='resident'){
+    if(sp)return head+`<b>${sp.nm}</b> 상태입니다.<br><br>· 온도 ${sp.env.temp==null?'센서 없음':`<b>${sp.env.temp}℃</b>`} · 습도 ${sp.env.humi==null?'센서 없음':sp.env.humi+'%'}<br>· 공기질 ${aqiOf(sp)==null?'센서 없음':'지수 '+aqiOf(sp)}<br>· 24시간 전기 <b>${fx(sp.kwh,2)}kWh</b><br><br>더 궁금한 항목을 물어보세요 (온도 · 공기질 · 전기 · 기기).`;
     if(s.includes('더워')||s.includes('거실'))return `<b>${spaceOf('living').nm}</b>은 서향이라 오후 일사가 집중됩니다.<br><br>현재 <b>29.1℃</b> · 적정 상한 26℃ 대비 <b>+3.1℃</b>입니다. 향후 6시간 내 31℃ 초과 확률이 <b>72%</b>로 예측됩니다.<br><br>· 전동커튼 SEC_1 자동 폐쇄<br>· 취침 2시간 전 선제 냉방<br><br>두 가지를 적용하면 취침 시각 기준 <b>27℃ 이하</b>로 낮출 수 있습니다.`;
     if(s.includes('요금')||s.includes('전기'))return `이달 누적 <b>21.8kWh</b>, 예상 <b>97.0kWh</b>입니다.<br><br>· 예상 누진 <b>1단계</b> (200kWh 이하)<br>· 예상 전기료 <b>12,550원</b><br><br>누진 2단계까지 <b>103kWh</b> 여유가 있습니다.`;
     if(s.includes('이웃')||s.includes('비교'))return `동일 평형 <b>${NEIGHBOR.n}세대</b> 평균과 비교하면 효율 등급 <b>${NEIGHBOR.grade}</b> · 상위 <b>${NEIGHBOR.pct}%</b>입니다.<br><br>· 전기 96.4kWh (평균 104.8) — 좋음<br>· <b>대기전력 4.6kWh (평균 2.0)</b> — 개선 필요<br><br>대기전력 자동 차단만 설정해도 월 3,200원을 아낄 수 있습니다.`;
@@ -221,16 +295,12 @@ export function aiReply(q){
 export function toggleFocus(){state.bare=!state.bare;app.classList.toggle('bare',state.bare);
   if(state.bare)toast('집중 모드 — ESC로 패널을 다시 표시합니다');}
 
+/* ESC — 분기 하나. 후퇴 순서는 popDetail() 이 전부 판단한다 (단계 9).
+   모달 → 상세 패널 → 드로어 → AI → 집중모드 → 우측 패널 → 없으면 무동작 */
 document.addEventListener('keydown',e=>{
   if(e.key!=='Escape')return;
-  if(!$('dlg').classList.contains('hidden'))return closeAll();
-  /* 상세 패널은 스택이므로 한 단계씩 후퇴. 비면 아래 단계로 내려간다 */
-  if(detailDepth()>0)return void popDetail();
-  if(state.drawerOpen)return toggleDrawer();
-  if(state.aiOpen)return toggleAi();
-  if(state.bare){state.bare=false;app.classList.remove('bare');return;}
-  if(state.role==='resident'&&state.page==='home'&&state.rightMode!=='summary')return backToSummary();
+  popDetail();
 });
 
 /* 인라인 핸들러가 참조하는 심볼을 window 에 등록 (동작 유지) */
-Object.assign(window,{renderRoleSel,pickRole,doLogin,renderRoleSw,setRole,renderSideNav,goPage,renderPage,pgHead,renderEnvStrip,PAGEFN,dlgOpen,closeAll,toast,toggleDrawer,renderDrawer,notiGo,renderNotiBadge,toggleAi,renderAi,ask,sendAsk,aiReply,toggleFocus});
+Object.assign(window,{renderRoleSel,pickRole,doLogin,renderRoleSw,setRole,renderSideNav,goPage,renderPage,pgHead,renderEnvStrip,PAGEFN,dlgOpen,closeAll,toast,toggleDrawer,renderDrawer,notiGo,renderNotiBadge,toggleAi,renderAi,ask,sendAsk,aiReply,aiCtx,toggleFocus});
