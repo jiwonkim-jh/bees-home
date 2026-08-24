@@ -1,62 +1,88 @@
 /* BEES Home v0.9 · pages/simulator.js — HM-15 에너지 시뮬레이터
-   OpenModelica Buildings 12.1.0 물리 시뮬레이션 결과를 시각화한다.
-   백엔드 없이 data/simCases.json 사전계산 결과를 정적으로 읽는다.
-   전 수치의 계보는 「시뮬」 — 센서 실측이 아니다.                        */
-import {fx} from '../data/module.js';
-import {MODULE} from '../data/moduleUnit.js';
+   OpenModelica Buildings 12.1.0 사전계산 결과(JSON 4케이스)를 시각화한다.
+   백엔드 없음 · 실시간 해석 호출 없음 — data/simulator/*.json 정적 로드.
+   전 수치의 계보는 「시뮬」이며 센서 실측이 아니다.
+   기준 문서 : BEES_HOME_에너지시뮬레이터_Cursor지시서.md §3~§6            */
+import {MYUNIT, RATE, fx, occupancyOf, won} from '../data/module.js';
 import {state} from '../data/state.js';
 import {svgXY} from '../render/chart.js';
 import {pgHead, renderPage, toast} from '../render/shell.js';
 
-/* 방 표시 순서·색상 — 지시서 지정 (침실 파랑 · 욕실 초록 · 주방 노랑 · 거실 빨강) */
-const ROOMS = [
-  { k:'bedroom', nm:'침실', c:'#0877ed', ts:'T_bed', pv:'PMV_bed' },
-  { k:'bath',    nm:'욕실', c:'#1a9c6a', ts:'T_bat', pv:'PMV_bat' },
-  { k:'kitchen', nm:'주방', c:'#e0a015', ts:'T_kit', pv:'PMV_kit' },
-  { k:'living',  nm:'거실', c:'#d64545', ts:'T_liv', pv:'PMV_liv' },
+/* ── 사전계산 케이스 (지시서 §4) ──────────────────────────────────── */
+export const PRESET_CASES = [
+  { mode:'냉방', from:24, to:26, file:'cold_24to26.json', tag:'절감' },
+  { mode:'냉방', from:24, to:18, file:'cold_24to18.json', tag:'증가' },
+  { mode:'난방', from:27, to:24, file:'heat_27to24.json', tag:'절감' },
+  { mode:'난방', from:22, to:25, file:'heat_22to25.json', tag:'증가' },
 ];
 
-const PMV_LIMIT = 0.5;            // ISO 7730 쾌적범위 ±0.5
+/* 모드별 허용 설정온도 범위 (지시서 §3-2) */
+export const SIM_RANGE = { '냉방':[16,32], '난방':[14,28] };
 
-/* ── 케이스 로드 ────────────────────────────────────────────────────
-   fetch 는 비동기라 렌더 시점에 준비되어 있어야 한다. index.html 부트에서
-   한 번 await 하고, 이후 렌더는 이 캐시만 읽는다.                     */
-let SIM = null;
+/* 공간 표시 순서·색상 (지시서 §3-4 : 침실 파랑 · 욕실 주황 · 주방 노랑 · 거실 빨강) */
+const ROOMS = [
+  { nm:'침실', c:'#0877ed' },
+  { nm:'욕실', c:'#e8730c' },
+  { nm:'주방', c:'#e0a015' },
+  { nm:'거실', c:'#d64545' },
+];
 
-export async function loadSimCases(){
-  if(SIM) return SIM;
-  try{
-    const r = await fetch('./data/simCases.json', {cache:'no-store'});
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    SIM = await r.json();
-  }catch(e){
-    SIM = { cases:[], error:String(e.message||e) };
-  }
-  return SIM;
+const PMV_LIMIT = 0.5;                      // ISO 7730 쾌적범위 ±0.5
+const DOWNSAMPLE_H = 0.5;                   // 30분 간격 표시 (원본 5분 · 지시서 §3-3)
+
+/* 시뮬레이션 기준 — 4케이스 JSON 의 conditions 가 동일하다.
+   「항상 표시」 요구(지시서 §3-2 카드 3) 때문에 로드 전에도 쓸 값이 필요하다. */
+const BASE_COND = {
+  preheat:'3일 (결과 제외)', clothing:'0.5 clo (냉방) / 1.0 clo (난방)',
+  activity:'1.2 met', pmvRange:'±0.5 ISO 7730', eer:3.2, cop:3.5,
+  weather:'San Francisco TMY3', model:'OpenModelica Buildings 12.1.0',
+};
+
+/* 전기요금 환산 — 주택용 누진 2단계 전력량요금 단가.
+   data/module.js RATE.energy[1] (214.6 원/kWh) 과 같은 값을 쓴다.
+   ※ 전력량요금만 곱한 참고용 추정값이다. 기본요금·기후환경·연료비조정·
+     부가세·전력기금은 넣지 않았다 (HM-07 절감 시나리오는 이들을 포함한
+     한계단가 258.8 원/kWh 를 쓰므로 두 화면의 금액이 다르다).           */
+const TARIFF_WON = RATE.energy[1];
+const BILL_DAYS  = 30;
+const monthWon = diffKwh => Math.round(diffKwh * BILL_DAYS * TARIFF_WON);
+
+/* ── 케이스 JSON 로드 (파일 단위 캐시) ────────────────────────────── */
+const CACHE = {};
+export async function loadCase(file){
+  if(CACHE[file]) return CACHE[file];
+  const r = await fetch('./data/simulator/' + file, {cache:'no-store'});
+  if(!r.ok) throw new Error(`${file} — HTTP ${r.status}`);
+  CACHE[file] = await r.json();
+  return CACHE[file];
 }
 
-export const simCases = () => (SIM && SIM.cases) || [];
+/* ── PMV 판정 (지시서 §5) ─────────────────────────────────────────── */
+export function pmvJudge(pmv){
+  if(Math.abs(pmv) <= PMV_LIMIT) return { label:'쾌적',   cls:'ok',     c:'#1a9c6a' };
+  if(pmv < -PMV_LIMIT)           return { label:'서늘함', cls:'info',   c:'#0877ed' };
+  return                                { label:'더움',   cls:'danger', c:'#d64545' };
+}
 
-/* ── 입력값 → 사전계산 케이스 매핑 ─────────────────────────────────
-   케이스 id 가 `cool_24to26` 형태로 모드·온도를 담고 있다. data 가 null 인
-   케이스도 id 만으로 매핑되므로, 「준비 중」인지 「케이스 없음」인지 구분된다.
-   ※ 실서비스 전환 시 이 함수만 POST /api/simulate/run 호출로 바꾸면 된다.  */
-const ID_RE = /^(cool|heat)_(\d+)to(\d+)$/;
-export const caseSpecs = () => simCases().map(c => {
-  const m = ID_RE.exec(c.id);
-  return m ? { ...c, mode:m[1]==='cool'?'cooling':'heating', from:+m[2], to:+m[3] } : null;
-}).filter(Boolean);
+/* ── 케이스 매칭 — 정확 일치만 ─────────────────────────────────────
+   근사 매칭은 쓰지 않는다. 입력값이 사전계산 4조합과 정확히 같지 않으면
+   결과를 만들지 않고 조합 버튼을 쓰도록 안내한다.
+   (없는 조건을 이웃 케이스 결과로 대신 보여주면 오해를 준다)           */
+export const NO_MATCH_MSG =
+  '사전계산 조합을 선택하세요. 위 4개 버튼 중 하나를 클릭하면 즉시 결과를 확인할 수 있습니다.';
 
-/* 모드별 허용 설정온도 범위 */
-export const SIM_RANGE = { cooling:[16,32], heating:[14,28] };
-const MODE_NM = { cooling:'냉방', heating:'난방' };
+export function matchCase(mode, fromTemp, toTemp){
+  return PRESET_CASES.find(c => c.mode===mode && c.from===fromTemp && c.to===toTemp) || null;
+}
 
-/* 입력 폼 기본값 — 첫 사전계산 케이스에 맞춘다 */
+/* ── 입력 폼 상태 ──────────────────────────────────────────────────── */
 function formInit(){
-  const s = caseSpecs()[0];
-  const when = (s && s.data && s.data.when) || '2026-08-19 22:00';
-  return { mode:(s&&s.mode)||'cooling', from:(s&&s.from)??24, to:(s&&s.to)??26,
-           date:when.slice(0,10), time:when.slice(11,16) };
+  const c = PRESET_CASES[0];
+  const now = new Date();                   // 기본값 = 오늘·현재 시각 (지시서 §3-2)
+  const p2 = n => String(n).padStart(2,'0');
+  return { mode:c.mode, from:c.from, to:c.to,
+           date:`${now.getFullYear()}-${p2(now.getMonth()+1)}-${p2(now.getDate())}`,
+           time:`${p2(now.getHours())}:${p2(now.getMinutes())}` };
 }
 function form(){
   if(!state.simForm) state.simForm = formInit();
@@ -66,64 +92,71 @@ function form(){
 export function simSet(k,v){
   const f = form();
   f[k] = (k==='from'||k==='to') ? Math.round(+v) : v;
-  /* 모드를 바꾸면 온도가 새 범위를 벗어날 수 있다 — 즉시 클램프한다 */
-  if(k==='mode'){
+  if(k==='mode'){                           // 모드가 바뀌면 새 범위로 클램프
     const [lo,hi] = SIM_RANGE[f.mode];
     f.from = Math.min(hi, Math.max(lo, f.from));
     f.to   = Math.min(hi, Math.max(lo, f.to));
   }
-  state.simRan = null;                       // 입력이 바뀌면 이전 결과를 버린다
+  state.simRun = null;                      // 입력이 바뀌면 이전 결과를 버린다
   renderPage();
 }
 
-/* ── 실행 ── */
-export function simRun(){
-  const f = form();
-  const [lo,hi] = SIM_RANGE[f.mode];
-  const nm = MODE_NM[f.mode];
-  const bad = v => !Number.isFinite(v) || v < lo || v > hi;
-
-  if(bad(f.from) || bad(f.to)){
-    state.simRan = { error:`${nm} 설정온도는 ${lo}~${hi}℃ 범위여야 합니다.` };
-  }else if(f.from === f.to){
-    state.simRan = { error:'현재온도와 바꿀온도가 같습니다. 다른 값을 입력하세요.' };
-  }else{
-    const hit = caseSpecs().find(c => c.mode===f.mode && c.from===f.from && c.to===f.to);
-    state.simRan = hit ? { caseId:hit.id } : { unmapped:true };
+/* ── 실행 — 케이스가 확정된 뒤 JSON 을 받아 결과를 세운다 ── */
+async function loadInto(hit){
+  state.simRun = { loading:true, hit };
+  renderPage();
+  try{
+    const data = await loadCase(hit.file);
+    state.simRun = { hit, data };
+  }catch(e){
+    state.simRun = { error:`결과를 불러오지 못했습니다 — ${e.message}` };
   }
   renderPage();
-  const r = state.simRan, hitCase = r.caseId && simCases().find(c => c.id === r.caseId);
+  const r = state.simRun;
   if(r.error) toast(r.error);
-  else if(r.unmapped) toast(`${nm} ${f.from}→${f.to}℃ — 사전계산 조합에 없습니다`);
-  else if(hitCase && !hitCase.data) toast(`${nm} ${f.from}→${f.to}℃ — 시뮬레이션 준비 중입니다`);
-  else toast(`${nm} ${f.from}→${f.to}℃ 결과를 표시합니다`);
+  else toast(`${hit.mode} ${hit.from}→${hit.to}℃ 결과를 표시합니다`);
 }
 
-/* 화면에 표시할 케이스 — **실행하기 전에는 아무 결과도 보여주지 않는다.**
-   simRan 에 caseId 가 있을 때만 결과를 낸다. 미실행·오류·미매핑은 전부 null. */
-function curCase(){
-  const r = state.simRan;
-  if(!r || !r.caseId) return null;
-  return simCases().find(c => c.id === r.caseId) || null;
+/* 실행 버튼 — 입력값이 4조합과 정확히 일치할 때만 결과를 낸다.
+   일치하지 않으면 결과 없이 안내 메시지만 표시한다.                     */
+export function simRun(){
+  const f = form();
+  const hit = matchCase(f.mode, f.from, f.to);
+  if(!hit){
+    state.simRun = { noMatch:true };
+    renderPage();
+    toast(NO_MATCH_MSG);
+    return;
+  }
+  return loadInto(hit);
 }
 
-/* ── 시계열 정리 ────────────────────────────────────────────────────
-   구현규칙 4 : h===0 인 행이 여러 개면 첫 번째만 쓴다.
-   (예열 3일 종료 시점이 중복 기록되는 경우가 있다)                    */
+/* 사전계산 조합 버튼 — 입력값을 세팅하고 즉시 결과 표시 (지시서 §3-2) */
+export function simPreset(i){
+  const c = PRESET_CASES[i]; if(!c) return;
+  const f = form();
+  f.mode = c.mode; f.from = c.from; f.to = c.to;
+  return loadInto(c);
+}
+
+/* ── 시계열 정리 ───────────────────────────────────────────────────
+   h===0 행이 중복이면 첫 번째만 쓰고, 30분 간격으로 내려 표시한다.     */
 function rows(d){
-  let seenZero = false;
-  return (d.timeseries || []).filter(r => {
+  let zero = false;
+  const uniq = (d.timeseries || []).filter(r => {
     if(r.h !== 0) return true;
-    if(seenZero) return false;
-    seenZero = true; return true;
+    if(zero) return false;
+    zero = true; return true;
   });
+  const out = [];
+  let next = 0;
+  uniq.forEach((r,i) => {
+    if(r.h >= next - 1e-6 || i === uniq.length-1){ out.push(r); next = r.h + DOWNSAMPLE_H; }
+  });
+  return out;
 }
 
-const pts = (rs, xk, yk) => rs.map(r => [r[xk], r[yk]]);
-
-/* 눈금 — 데이터 범위에서 만든다 (임의 상수 없음).
-   마지막 눈금이 최대값보다 작으면 선이 차트 위로 벗어나므로,
-   눈금을 최대값 이상까지 채운 뒤 그 값을 y1 로 쓴다.                  */
+/* 눈금 — 데이터 범위에서 만든다. 마지막 눈금은 최대값 이상까지 채운다. */
 function ticksOf(vals, n){
   const mn = Math.min(...vals), mx = Math.max(...vals);
   const lo = Math.floor(mn), hi = Math.ceil(mx);
@@ -133,55 +166,37 @@ function ticksOf(vals, n){
   return { y0:lo, y1:out[out.length-1], yTicks:out };
 }
 
+const SIM = `<span class="srcb sim">시뮬</span>`;
+
 /* ══════════ HM-15 화면 ══════════ */
 export function pgSimulator(){
-  const cs = simCases();
-  const c  = curCase();
-
-  if(!cs.length) return pgHead('simulator','설정온도 변경 시 24시간 후 전력·온도·쾌적도 변화')+`
-    <div class="empty">시뮬레이션 결과를 불러오지 못했습니다.
-      ${SIM && SIM.error ? `<br><small>${SIM.error}</small>` : ''}
-      <br><small>data/simCases.json 을 확인하세요.</small></div>`;
-
-  const d  = c && c.data;
-  const st = state.simRan;
-
-  return pgHead('simulator','설정온도 변경 시 24시간 후 전력·온도·쾌적도 변화',
-    `<span class="srcb sim">시뮬</span>`) + `
+  const r = state.simRun;
+  const d = r && r.data;
+  return pgHead('simulator','설정온도 변경 시 24시간 후 전력·온도·쾌적도 변화', SIM) + `
   <div class="simGrid">
-
-    <!-- ══════════ 좌측 ══════════ -->
-    <div class="simCol">
-      <div class="card unitCard">
-        <div><div class="un">🏢 ${MODULE.nm} · ${MODULE.bbox.w.toFixed(0)}×${MODULE.bbox.d.toFixed(0)}m</div>
-          <div class="ua">인천 기상 기반 물리 시뮬레이션</div></div>
-        <span class="pill info">사전계산 ${cs.filter(x=>x.data).length}건</span>
-      </div>
-      ${formCard()}
-      ${d ? condCard(d) : ''}
-    </div>
-
-    <!-- ══════════ 중앙 ══════════ -->
-    <div class="simCol">
-      ${d ? powerCard(d) + cumChart(d) : stateCard(st, c, '전력 비교')}
-    </div>
-
-    <!-- ══════════ 우측 ══════════ -->
-    <div class="simCol">
-      ${d ? pmvCard(d) + tempChart(d) : stateCard(st, c, '쾌적도 판정')}
-    </div>
+    <div class="simCol">${unitCard()}${formCard()}${condCard(d)}</div>
+    <div class="simCol">${d ? centerResult(r,d) : centerEmpty(r)}</div>
+    <div class="simCol">${d ? pmvCard(d) + tempChart(d) : ''}</div>
   </div>`;
 }
 
-/* ── 입력 폼 ──────────────────────────────────────────────────────
-   실서비스 전환 시 「시뮬레이션 실행」 핸들러만 POST 호출로 바꾼다.      */
+/* ── 좌측 카드 1 : 세대 정보 (HM-01 과 동일 형태) ── */
+function unitCard(){
+  const occ = occupancyOf();
+  return `<div class="card unitCard">
+    <div><div class="un">🏢 ${MYUNIT.nm}</div>
+      <div class="ua">전용 ${MYUNIT.area}㎡ · ${MYUNIT.household}인 가구 · ${MYUNIT.movedIn} 입주</div></div>
+    ${occ ? `<span class="pill ${occ.on?'ok':'mute'} dot">${occ.on?'재실 중':'부재 중'}</span>`
+          : `<span class="pill mute">재실 센서 없음</span>`}
+  </div>`;
+}
+
+/* ── 좌측 카드 2 : 시뮬레이션 설정 ── */
 function formCard(){
-  const f = form(), st = state.simRan;
+  const f = form(), r = state.simRun;
   const [lo,hi] = SIM_RANGE[f.mode];
-  const err = st && st.error;
   const num = (k,label) => `
-    <div class="simRow">
-      <span class="srLbl">${label}</span>
+    <div class="simRow"><span class="srLbl">${label}</span>
       <span class="srIn">
         <input class="simNum" type="number" min="${lo}" max="${hi}" step="1" value="${f[k]}"
                oninput="simSet('${k}',this.value)" aria-label="${label}"><span class="srU">℃</span>
@@ -190,12 +205,12 @@ function formCard(){
       </span></div>`;
   return `<div class="card">
     <div class="ch"><span class="ct"><span class="ci">🎛</span>시뮬레이션 설정</span>
-      <span class="cx">${lo}~${hi}℃</span></div>
+      <span class="cx">${lo}–${hi}℃</span></div>
     <div class="cb">
       <div class="simRow"><span class="srLbl">모드</span>
         <span class="srIn"><span class="seg" style="width:100%">
-          ${Object.keys(MODE_NM).map(m=>`<button class="${f.mode===m?'on':''}"
-            onclick="simSet('mode','${m}')" style="flex:1">${m==='cooling'?'❄':'🔥'} ${MODE_NM[m]}</button>`).join('')}
+          ${Object.keys(SIM_RANGE).map(m => `<button class="${f.mode===m?'on':''}" style="flex:1"
+            onclick="simSet('mode','${m}')">${m==='냉방'?'☀':'🔥'} ${m}</button>`).join('')}
         </span></span></div>
       ${num('from','현재온도')}
       ${num('to','바꿀온도')}
@@ -205,176 +220,173 @@ function formCard(){
       <div class="simRow"><span class="srLbl">시각</span>
         <span class="srIn"><input class="simNum wide" type="time" value="${f.time}"
           oninput="simSet('time',this.value)" aria-label="시각"></span></div>
-      ${err?`<div class="simErr">⚠ ${err}</div>`:''}
+      ${r && r.noMatch ? `<div class="simErr">${NO_MATCH_MSG}</div>` : ''}
+      ${r && r.error ? `<div class="simErr">⚠ ${r.error}</div>` : ''}
       <button class="btn blue simRunBtn" onclick="simRun()">▶ 시뮬레이션 실행</button>
-      <div class="srcNote">날짜·시각은 사전계산 결과에 반영되지 않습니다 — 실서비스 전환 시
-        <b>POST /api/simulate/run</b> 파라미터로 전달됩니다.</div>
-      <div class="sec" style="margin-top:10px">사전계산 보유 조합</div>
-      <div class="simHave">${caseSpecs().map(s=>`
-        <span class="shItem ${s.data?'':'na'}">${MODE_NM[s.mode]} ${s.from}→${s.to}℃
-          ${s.data?'':'<small>준비 중</small>'}</span>`).join('')}</div>
+
+      <div class="sec" style="margin-top:12px">사전계산 보유 조합</div>
+      <div class="simPresets">${PRESET_CASES.map((c,i) => {
+        const on = r && r.hit && r.hit.file===c.file;
+        return `<button class="simPreset ${on?'on':''}" onclick="simPreset(${i})">
+          <b>${c.mode} ${c.from}→${c.to}℃</b>
+          <span class="pill ${c.tag==='절감'?'ok':'danger'}">${c.tag}</span></button>`;}).join('')}</div>
+      <div class="srcNote">결과는 위 4개 조합에 대해서만 제공됩니다.
+        실행 버튼은 입력값이 이 중 하나와 정확히 같을 때만 결과를 표시합니다.
+        날짜·시각은 사전계산 결과에 반영되지 않습니다.</div>
     </div></div>`;
 }
 
-/* ── 시뮬레이션 기준 ── */
+/* ── 좌측 카드 3 : 시뮬레이션 기준 (항상 표시) ── */
 function condCard(d){
+  const c = (d && d.conditions) || BASE_COND;
+  const row = (k,v) => `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
   return `<div class="card">
     <div class="ch"><span class="ct"><span class="ci">📐</span>시뮬레이션 기준</span></div>
     <div class="cb">
-      <div class="kv"><span class="k">예열</span><span class="v">${d.conditions.warmup_days}일 <small>결과 제외</small></span></div>
-      <div class="kv"><span class="k">착의량</span><span class="v">${d.conditions.clo} clo <small>여름</small></span></div>
-      <div class="kv"><span class="k">활동량</span><span class="v">${d.conditions.met} met</span></div>
-      <div class="kv"><span class="k">PMV 쾌적범위</span><span class="v">±${PMV_LIMIT} <small>ISO 7730</small></span></div>
-      <div class="kv"><span class="k">냉방 EER</span><span class="v">${d.conditions.eer_coo}</span></div>
-      <div class="kv"><span class="k">난방 COP</span><span class="v">${d.conditions.cop_hea}</span></div>
-      <div class="kv"><span class="k">기상 데이터</span><span class="v">${d.conditions.weather}</span></div>
-      <div class="kv"><span class="k">기준 시각</span><span class="v">${d.when}</span></div>
-      <div class="srcNote">OpenModelica Buildings 12.1.0 물리 시뮬레이션 — 센서 실측이 아닙니다</div>
+      ${row('예열', c.preheat)}
+      ${row('착의량', c.clothing)}
+      ${row('활동량', c.activity)}
+      ${row('PMV 쾌적범위', c.pmvRange)}
+      ${row('냉방 EER', c.eer)}
+      ${row('난방 COP', c.cop)}
+      ${row('기상 데이터', c.weather)}
+      <div class="srcNote">${c.model} 물리 시뮬레이션 — 센서 실측이 아닙니다</div>
     </div></div>`;
 }
 
-/* ── 결과가 없을 때 — 카드를 숨기지 않고 사유를 남긴다 ──────────────
-   상태 4가지를 구분한다.
-     ① 입력 오류        범위 밖 · 현재=바꿀
-     ② 준비 중          매핑된 케이스는 있으나 data 가 아직 null
-     ③ 조합 없음        사전계산 목록에 그 조합 자체가 없다
-     ④ 대기             아직 실행하지 않았다                            */
-function stateCard(st, c, title){
-  const f = form(), nm = MODE_NM[f.mode];
-  const combo = `${nm} ${f.from} → ${f.to}℃`;
-  let pill, icon = '🧪', head = combo, body;
-  if(st && st.error){
-    pill = '입력 확인'; icon = '⚠'; head = '입력값을 확인하세요'; body = st.error;
-  }else if(st && st.caseId && c && !c.data){
-    pill = '준비 중';
-    body = `이 조합은 <b>시뮬레이션 준비 중입니다</b>.<br>OpenModelica 해석 결과가 확보되면 자동으로 표시됩니다.`;
-  }else if(st && st.unmapped){
-    pill = '조합 없음';
-    body = `사전계산에 <b>없는 조합</b>입니다.<br>좌측 「사전계산 보유 조합」에서 값을 확인하세요.`;
-  }else{
-    pill = '대기';
-    body = `<b>시뮬레이션 실행</b>을 누르면 결과가 표시됩니다.`;
-  }
-  return `<div class="card">
-    <div class="ch"><span class="ct"><span class="ci">🧪</span>${title}</span>
-      <span class="pill ${st&&st.error?'warn':'mute'}">${pill}</span></div>
-    <div class="cb" style="padding:26px 12px;text-align:center">
-      <div style="font-size:26px;opacity:.35">${icon}</div>
-      <div style="font-weight:800;margin-top:8px">${head}</div>
-      <div style="font-size:11.5px;color:var(--muted2);margin-top:6px;line-height:1.7">${body}</div>
-    </div></div>`;
+/* ── 중앙 : 실행 전 · 로딩 · 미일치 · 오류 ── */
+function centerEmpty(r){
+  const box = (icon,title,desc) => `<div class="card"><div class="cb simBlank">
+    <div class="sbI">${icon}</div><div class="sbT">${title}</div>
+    <div class="sbD">${desc}</div></div></div>`;
+  if(r && r.loading)
+    return box('⏳','결과를 불러오는 중입니다',`${r.hit.mode} ${r.hit.from}→${r.hit.to}℃`);
+  if(r && r.error)
+    return box('⚠','결과를 표시할 수 없습니다', r.error);
+  if(r && r.noMatch)
+    return box('🧪','사전계산 조합이 아닙니다', NO_MATCH_MSG);
+  return box('🧪','시뮬레이션 결과가 없습니다',
+    '좌측 <b>사전계산 보유 조합</b> 4개 버튼 중 하나를 클릭하세요.');
 }
 
-/* ── 전력 비교 ── */
-function powerCard(d){
-  const p = d.power, save = p.diff_pct < 0;
-  const cell = (v, u, col) => `<td class="n" style="${col ? `color:${col};font-weight:800` : ''}">${v}<small>${u}</small></td>`;
-  return `<div class="card">
-    <div class="ch"><span class="ct"><span class="ci">⚡</span>전력 비교</span>
-      <span class="cx">${d.label} · 24시간</span></div>
+/* ── 중앙 : 결과 ── */
+function centerResult(r,d){
+  const m = d.meta, p = d.summary.power24h, pk = d.summary.peakPower;
+  const save = p.diff < 0;
+  const col  = save ? '#1a9c6a' : '#d64545';
+  const rm   = d.summary.rooms;
+  /* 전체 쾌적도 — 4개 방 판정이 모두 같으면 그 값, 다르면 가장 나쁜 쪽 */
+  const judges = ROOMS.map(x => rm[x.nm] && pmvJudge(rm[x.nm].pmvChange)).filter(Boolean);
+  const worst = judges.find(j => j.label !== '쾌적') || judges[0] || pmvJudge(0);
+  const allOk = judges.every(j => j.label === '쾌적');
+  const sg = (v,n=2) => (v>0?'+':'') + fx(v,n);
+
+  return `
+  <div class="card">
+    <div class="ch"><span class="ct"><span class="ci">🧪</span>${m.mode} ${m.fromTemp}℃ → ${m.toTemp}℃ 변경 시나리오</span>${SIM}</div>
     <div class="cb">
-      <table class="tbl simTbl"><thead><tr>
-        <th>항목</th><th class="n">유지</th><th class="n">변경</th><th class="n">차이</th>
-      </tr></thead><tbody>
-        <tr><td class="str">24시간 전력</td>
-          ${cell(fx(p.keep_kwh,2),' kWh')}${cell(fx(p.change_kwh,2),' kWh')}
-          ${cell((p.diff_kwh>0?'+':'')+fx(p.diff_kwh,2),' kWh', save?'#1a9c6a':'#d64545')}</tr>
-        <tr><td class="str">피크 전력</td>
-          ${cell(fx(p.keep_peak_kw,2),' kW')}${cell(fx(p.change_peak_kw,2),' kW')}
-          ${cell(fx(p.change_peak_kw-p.keep_peak_kw,2),' kW',
-                 p.change_peak_kw<p.keep_peak_kw?'#1a9c6a':'#d64545')}</tr>
-      </tbody></table>
-      <div class="simHero ${save?'ok':'bad'}">
-        <span class="shl">${save?'절감률':'증가율'}</span>
-        <span class="shv">${(p.diff_pct>0?'+':'')+fx(p.diff_pct,1)}<small>%</small></span>
+      <div class="simSub">${m.date} ${m.time} 기준 · 이후 24시간 · ${m.season}</div>
+      <div class="simKpi">
+        <div class="skCard">
+          <div class="skT">24시간 전력사용량</div>
+          <div class="skR"><span>유지</span><b>${fx(p.keep,3)} kWh</b></div>
+          <div class="skR"><span>변경</span><b>${fx(p.change,3)} kWh</b></div>
+          <div class="skD" style="color:${col}">${sg(p.diff,2)} kWh <small>(${sg(p.diffPct,1)}%)</small></div>
+          ${/* 월 전기요금 환산 — 24시간 차이 × 30일 × 전력량요금 */''}
+          <div class="skBill" style="color:${col}">월 약 <b>${won(Math.abs(monthWon(p.diff)))}원</b>
+            ${save?'절감':'증가'} 예상</div>
+          <div class="skNote">누진 2단계(${fx(TARIFF_WON,1)}원/kWh) 기준 참고용 추정값</div>
+        </div>
+        <div class="skCard">
+          <div class="skT">피크 전력</div>
+          <div class="skR"><span>유지</span><b>${fx(pk.keep,3)} kW</b></div>
+          <div class="skR"><span>변경</span><b>${fx(pk.change,3)} kW</b></div>
+          <div class="skD" style="color:${pk.diff<0?'#1a9c6a':'#d64545'}">${sg(pk.diff,3)} kW</div>
+        </div>
+        <div class="skCard">
+          <div class="skT">쾌적도 판정</div>
+          <div class="skR"><span>전체</span><b style="color:${worst.c}">${worst.label}${allOk?' ✓':''}</b></div>
+          <div class="skD" style="font-size:11px;color:var(--muted2);font-weight:600">
+            ${allOk ? '4개 공간 모두 쾌적' : `${judges.filter(j=>j.label!=='쾌적').length}개 공간 범위 밖`}</div>
+        </div>
       </div>
-    </div></div>`;
+    </div></div>
+  ${cumChart(d,save)}`;
 }
 
-/* ── 누적전력 시계열 ── */
-function cumChart(d){
-  const rs = rows(d);
-  const all = rs.flatMap(r => [r.kWh_keep, r.kWh_change]);
-  const ax  = ticksOf(all, 5);
+/* ── 중앙 : 누적전력 시계열 ── */
+function cumChart(d,save){
+  const rs = rows(d), m = d.meta;
+  const ax = ticksOf(rs.flatMap(x => [x.cumKeep, x.cumChange]), 5);
+  const cc = save ? '#1a9c6a' : '#d64545';
   return `<div class="card">
     <div class="ch"><span class="ct"><span class="ci">📈</span>누적 전력</span>
       <span class="cx">설정 변경 후 경과시간</span></div>
     <div class="cb">
       ${svgXY([
-        { pts:pts(rs,'h','kWh_keep'),   c:'#96a1b0', dash:true },
-        { pts:pts(rs,'h','kWh_change'), c:'#0877ed', fillTo:0 },
-      ], 560, 200, { x0:0, x1:24, xTicks:[0,4,8,12,16,20,24], ...ax })}
+        { pts:rs.map(x=>[x.h,x.cumKeep]),   c:'#96a1b0', dash:true },
+        { pts:rs.map(x=>[x.h,x.cumChange]), c:cc, fillTo:0 },
+      ], 560, 210, { x0:0, x1:24, xTicks:[0,4,8,12,16,20,24], ...ax })}
       <div class="simLegend">
-        <span><i class="lgLine dash" style="background:#96a1b0"></i>유지 (${d.from}℃)</span>
-        <span><i class="lgLine" style="background:#0877ed"></i>변경 (${d.to}℃)</span>
-        <span class="lgAx">가로 경과시간 h · 세로 누적전력 kWh</span>
+        <span><i class="lgLine dash"></i>유지 (${m.fromTemp}℃)</span>
+        <span><i class="lgLine" style="background:${cc}"></i>변경 (${m.toTemp}℃)</span>
+        <span class="lgAx">세로 kWh · 30분 간격 (원본 5분 ${d.timeseries.length}행)</span>
       </div>
-      ${cumNote(d, rs)}
     </div></div>`;
 }
 
-/* 시계열 끝값과 요약 수치가 다르면 이유를 밝힌다 (규칙 §9) */
-function cumNote(d, rs){
-  const last = rs[rs.length-1];
-  if(!last) return '';
-  const gapK = Math.abs(last.kWh_keep - d.power.keep_kwh);
-  if(gapK < 0.05) return '';
-  return `<div class="srcNote">그래프는 표본 19점(0.08~2h 간격) 기준 누적이고,
-    위 표는 해석 전 구간 적분값입니다 — 끝값이 ${fx(last.kWh_keep,2)} / ${fx(d.power.keep_kwh,2)} kWh 로 다릅니다.</div>`;
-}
-
-/* ── 쾌적도 판정 ── */
+/* ── 우측 카드 1 : 공간별 PMV 쾌적도 ── */
 function pmvCard(d){
-  const ok = v => Math.abs(v) <= PMV_LIMIT;
-  const sg = v => (v>0?'+':'')+fx(v,2);
+  const rm = d.summary.rooms;
+  const sg = v => (v>0?'+':'') + fx(v,2);
   return `<div class="card">
-    <div class="ch"><span class="ct"><span class="ci">🌡</span>쾌적도 판정</span>
-      <span class="cx">PMV · 24시간 후</span></div>
+    <div class="ch"><span class="ct"><span class="ci">🌡</span>공간별 쾌적도</span>${SIM}</div>
     <div class="cb">
-      <table class="tbl simTbl"><thead><tr>
-        <th>공간</th><th class="n">유지</th><th class="n">변경</th><th>판정</th>
+      ${/* 유지·변경 두 열 각각에 PMV 값 + 판정 라벨을 붙인다 */''}
+      <table class="tbl simTbl pmvTbl"><thead><tr>
+        <th>공간</th><th>유지</th><th>변경</th>
       </tr></thead><tbody>
-        ${ROOMS.map(r => { const v = d.pmv_24h[r.k]; if(!v) return '';
-          const good = ok(v.change);
+        ${ROOMS.map(x => { const v = rm[x.nm]; if(!v) return '';
+          const cell = pmv => { const j = pmvJudge(pmv);
+            return `<td><span class="pmvV">${sg(pmv)}</span>
+              <span class="pill ${j.cls}">${j.label}${j.label==='쾌적'?' ✓':''}</span></td>`; };
           return `<tr>
-            <td class="str"><i class="lgDot" style="background:${r.c}"></i>${r.nm}</td>
-            <td class="n">${sg(v.keep)}</td>
-            <td class="n" style="font-weight:800">${sg(v.change)}</td>
-            <td><span class="pill ${good?'ok':'warn'}">${v.grade}${good?' ✓':''}</span></td>
-          </tr>`; }).join('')}
+            <td class="str"><i class="lgDot" style="background:${x.c}"></i>${x.nm}</td>
+            ${cell(v.pmvKeep)}${cell(v.pmvChange)}
+          </tr>`;}).join('')}
       </tbody></table>
-      <div class="simScale">
-        <span>−${PMV_LIMIT} 서늘</span><span>0 중립</span><span>+${PMV_LIMIT} 따뜻</span>
-      </div>
-      <div class="srcNote">ISO 7730 쾌적범위 −${PMV_LIMIT} ~ +${PMV_LIMIT} · 착의 ${d.conditions.clo} clo 기준</div>
+      <div class="simScale"><span>−${PMV_LIMIT} 서늘함</span><span>0 중립</span><span>+${PMV_LIMIT} 더움</span></div>
+      <div class="srcNote">ISO 7730 쾌적범위 −${PMV_LIMIT} ~ +${PMV_LIMIT} ·
+        착의량 ${d.meta.mode==='냉방'?'0.5':'1.0'} clo 기준</div>
     </div></div>`;
 }
 
-/* ── 실내온도 시계열 (4방 × 유지/변경) ── */
+/* ── 우측 카드 2 : 실내온도 시계열 (4공간 × 유지/변경) ── */
 function tempChart(d){
-  const rs = rows(d);
-  const all = ROOMS.flatMap(r => rs.flatMap(x => [x[r.ts+'_keep'], x[r.ts+'_change']]));
+  const rs = rows(d), m = d.meta;
+  const all = rs.flatMap(x => ROOMS.flatMap(o => [x.tempKeep[o.nm], x.tempChange[o.nm]]));
   const ax  = ticksOf(all, 5);
   const series = [];
-  ROOMS.forEach(r => {
-    series.push({ pts:pts(rs,'h',r.ts+'_keep'),   c:r.c, dash:true, wd:1.3 });
-    series.push({ pts:pts(rs,'h',r.ts+'_change'), c:r.c, wd:1.8 });
+  ROOMS.forEach(o => {
+    series.push({ pts:rs.map(x=>[x.h,x.tempKeep[o.nm]]),   c:o.c, dash:true, wd:1.3 });
+    series.push({ pts:rs.map(x=>[x.h,x.tempChange[o.nm]]), c:o.c, wd:1.8 });
   });
   return `<div class="card">
     <div class="ch"><span class="ct"><span class="ci">🌡</span>실내온도</span>
-      <span class="cx">${d.from}℃ → ${d.to}℃</span></div>
+      <span class="cx">${m.fromTemp}℃ → ${m.toTemp}℃</span>${SIM}</div>
     <div class="cb">
-      ${svgXY(series, 560, 200, { x0:0, x1:24, xTicks:[0,4,8,12,16,20,24], ...ax })}
+      ${svgXY(series, 560, 210, { x0:0, x1:24, xTicks:[0,4,8,12,16,20,24], ...ax })}
       <div class="simLegend">
-        ${ROOMS.map(r => `<span><i class="lgDot" style="background:${r.c}"></i>${r.nm}</span>`).join('')}
+        ${ROOMS.map(o => `<span><i class="lgDot" style="background:${o.c}"></i>${o.nm}</span>`).join('')}
         <span class="lgAx">점선 유지 · 실선 변경</span>
       </div>
-      <div class="simDelta">${ROOMS.map(r => { const t = d.temp_24h[r.k]; if(!t) return '';
-        return `<div><span class="sdN">${r.nm}</span>
-          <span class="sdV">${fx(t.keep,1)} → <b style="color:${r.c}">${fx(t.change,1)}</b>℃</span>
-          <span class="sdD">${(t.diff>0?'+':'')+fx(t.diff,2)}</span></div>`; }).join('')}</div>
+      <div class="simDelta">${ROOMS.map(o => { const v = d.summary.rooms[o.nm]; if(!v) return '';
+        return `<div><span class="sdN">${o.nm}</span>
+          <span class="sdV">${fx(v.tempKeep,1)} → <b style="color:${o.c}">${fx(v.tempChange,1)}</b>℃</span>
+          <span class="sdD">${(v.tempDiff>0?'+':'')+fx(v.tempDiff,2)}</span></div>`;}).join('')}</div>
     </div></div>`;
 }
 
 /* 인라인 핸들러가 참조하는 심볼을 window 에 등록 (동작 유지) */
-Object.assign(window,{pgSimulator,simSet,simRun,loadSimCases,simCases,caseSpecs,SIM_RANGE});
+Object.assign(window,{pgSimulator,simSet,simRun,simPreset,matchCase,pmvJudge,loadCase,
+  PRESET_CASES,SIM_RANGE});

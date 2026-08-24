@@ -10,8 +10,10 @@ export const state={
   role:'resident', loginUser:'Admin', pickedRole:'resident',
   page:'home',
   planTab:'energy', selRoom:null, selSensor:null,
+  dashTab:'ops',                /* SCR-01 탭 — ops | env | link */
+  dashEng:'day',                /* SCR-01 단지 전력 토글 — day | 30d */
   simForm:null,                 /* HM-15 입력 폼 {mode,from,to,date,time} — 최초 렌더에서 채운다 */
-  simRan:null,                  /* HM-15 실행 결과 {caseId} | {error} | {unmapped} */
+  simRun:null,                  /* HM-15 실행 결과 {hit,data} | {loading} | {error} */
   /* 우측 패널 네비게이션 스택 (render/detail.js 가 관리)
      [summary] → [summary,space] → [summary,space,sensor]
      rightMode 단일 문자열을 대체한다. 읽기는 rightMode(), 이동은 rightTo(). */

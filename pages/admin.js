@@ -5,7 +5,7 @@ import {MODULE} from '../data/moduleUnit.js';
 import {ALARMS,AUDIT,CCTVS,COSTS,ENG_TREND,IFACES,KPIS,PARTNERS,RECS,REQUESTS,RISKS,SAFETY,SAFE_SEV,TIMELINE,WORKORDERS,WORKTIME,typeGroups} from '../data/ops.js';
 import {state} from '../data/state.js';
 import {donut,svgArea,svgBars,svgMulti} from '../render/chart.js';
-import {closeAll,dlgOpen,pgHead,renderNotiBadge,renderPage,renderSideNav,toast} from '../render/shell.js';
+import {closeAll,dlgOpen,goPage,pgHead,renderNotiBadge,renderPage,renderSideNav,toast} from '../render/shell.js';
 import {openDetail,popDetail,clearDetail,setDetailTab} from '../render/detail.js';
 
 /* ══════════════════════════════════════════════════════════════════
@@ -16,83 +16,188 @@ export function pgDash(){
   const openRq=REQUESTS.filter(r=>r.st!=='done'), late=openRq.filter(r=>r.slaPct>=80).length;
   const openWo=WORKORDERS.filter(w=>w.st==='planned'||w.st==='progress');
   const openSf=SAFETY.filter(s=>s.st!=='done');
-  const totalEng=MODULE_TYPES.reduce((a,t)=>a+t.eng,0);
-  const tgrps=typeGroups(ALARMS.filter(a=>a.st!=='done'));
+  /* 환경 위험 알람 — 미처리 알람 부제에 함께 쓴다 (SCR-08 통합) */
+  const envAl=openAl.filter(a=>ENV_ALARM_TYPES.includes(a.type)).length;
+  /* 단지 전력 — 당일은 타입별 합계, 30일은 추이 누적 (토글) */
+  const engDay=MODULE_TYPES.reduce((a,t)=>a+t.eng,0);
+  const eng30=ENG_TREND.reduce((a,e)=>a+ +e.elec,0);
+  const day=state.dashEng!=='30d';
+  /* 이상치 개체 — 입주 개체 중 그룹 평균 초과분 */
+  const occ=UNITS.filter(u=>u.occ);
+  const avg=occ.reduce((a,u)=>a+u.kwh,0)/(occ.length||1);
+  const anom=occ.filter(u=>u.kwh>125).slice(0,6);
+
   return pgHead('dash',`${COMPLEX.nm} · 모듈 ${MODULE_TYPES.length}종 · 개체 ${COMPLEX.units}기 · 최근 갱신 ${ENVSYS.time}`,
     `<button class="btn sm" onclick="goPage('map')">🗺 트윈 맵</button>
      <button class="btn pri sm" onclick="goPage('alarm')">미처리 ${openAl.length}건 처리 →</button>`)+`
-  <div class="kpiRow" style="grid-template-columns:repeat(6,1fr)">
-    <div class="kpi ${urg?'danger':'ok'}"><div class="kl2">🔔 미처리 알람</div>
+
+  ${/* ── KPI 8개 · 2줄 4열 · 탭 전환과 무관하게 항상 고정 ── */''}
+  <div class="kpiRow kpi8">
+    <div class="kpi ${urg?'danger':'ok'} clk" onclick="goPage('alarm')"><div class="kl2">🔔 미처리 알람</div>
       <div class="kv2 num">${openAl.length}<small>건</small></div>
-      <div class="ks">긴급 <b class="up">${urg}</b> · 높음 ${openAl.filter(a=>a.sev===2).length}</div></div>
-    <div class="kpi ${late?'warn':'ok'}"><div class="kl2">📋 미처리 민원</div>
+      <div class="ks">긴급 <b class="up">${urg}</b> · 환경위험 <b class="up">${envAl}</b>건 포함</div></div>
+    <div class="kpi ${late?'warn':'ok'} clk" onclick="goPage('req')"><div class="kl2">📋 미처리 민원</div>
       <div class="kv2 num">${openRq.length}<small>건</small></div>
       <div class="ks">SLA 임박 <b class="up">${late}</b> · 반복 ${REQUESTS.filter(r=>r.rep>=3).length}</div></div>
-    <div class="kpi info"><div class="kl2">🔧 진행 중 작업</div>
+    <div class="kpi info clk" onclick="goPage('work')"><div class="kl2">🔧 작업 진행</div>
       <div class="kv2 num">${openWo.length}<small>건</small></div>
       <div class="ks">완료 보고 대기 ${WORKORDERS.filter(w=>w.st==='reported').length}</div></div>
-    <div class="kpi ${openSf.filter(s=>s.sev===1).length?'danger':'warn'}"><div class="kl2">🛡 미조치 안전</div>
-      <div class="kv2 num">${openSf.length}<small>건</small></div>
-      <div class="ks">긴급 <b class="up">${openSf.filter(s=>s.sev===1).length}</b> · PRD KPI</div></div>
-    <div class="kpi"><div class="kl2">⚡ 금일 단지 전력 <span class="srcb meas">계측</span></div>
-      <div class="kv2 num">${fx(totalEng)}<small>kWh</small></div>
-      <div class="ks">전일 대비 <b class="up">▲ 6.2%</b></div></div>
     <div class="kpi ok"><div class="kl2">✅ SLA 준수율</div>
       <div class="kv2 num">92.4<small>%</small></div>
       <div class="ks">전월 대비 <b class="dn">▲ 4.3%p</b></div></div>
+
+    <div class="kpi"><div class="kl2">⚡ 단지 전력 <span class="srcb meas">계측</span>
+        <span class="seg mini kpiSeg">
+          <button class="${day?'on':''}" onclick="setDashEng('day')">당일</button>
+          <button class="${day?'':'on'}" onclick="setDashEng('30d')">30일</button></span></div>
+      <div class="kv2 num">${day?fx(engDay):won(eng30)}<small>kWh</small></div>
+      <div class="ks">${day?'전일 대비 <b class="up">▲ 6.2%</b>':'30일 누적 · 전월 대비 <b class="up">▲ 8.4%</b>'}</div></div>
+    <div class="kpi warn clk" onclick="setDashTab('env')"><div class="kl2">⚠ 이상치 개체 <span class="srcb calc">±2σ</span></div>
+      <div class="kv2 num">${anom.length}<small>기</small></div>
+      <div class="ks">공실 제외 · 판정 보류 2 · 목록 보기 ›</div></div>
+    <div class="kpi"><div class="kl2">📊 개체 평균</div>
+      <div class="kv2 num">${fx(avg)}<small>kWh</small></div>
+      <div class="ks">동일 모듈 타입 기준</div></div>
+    <div class="kpi ${openSf.filter(s=>s.sev===1).length?'danger':'warn'} clk" onclick="goPage('safety')"><div class="kl2">🛡 미조치 안전</div>
+      <div class="kv2 num">${openSf.length}<small>건</small></div>
+      <div class="ks">긴급 <b class="up">${openSf.filter(s=>s.sev===1).length}</b> · PRD KPI</div></div>
   </div>
 
+  ${/* ── 탭 3개 · 기본 「운영 현황」 ── */''}
+  <div class="tabRow" style="margin-bottom:12px">
+    <div class="tabs">${DASH_TABS.map(t=>
+      `<button class="${dashTab()===t.k?'on':''}" onclick="setDashTab('${t.k}')">
+        <span class="ti">${t.i}</span>${t.nm}</button>`).join('')}</div>
+  </div>
+  ${dashTab()==='ops'?dashOps(openAl,openSf)
+   :dashTab()==='env'?dashEnv(anom,avg)
+   :dashLink()}`;
+}
+
+/* 대시보드 탭 정의 — 기본 「운영 현황」 */
+const DASH_TABS=[{k:'ops',nm:'운영 현황',i:'⬡'},{k:'env',nm:'에너지·환경',i:'⚡'},{k:'link',nm:'데이터 연계',i:'🔌'}];
+const dashTab=()=>state.dashTab||'ops';
+export function setDashTab(k){state.dashTab=k;renderPage();}
+export function setDashEng(k){state.dashEng=k;renderPage();}
+
+/* 환경 위험으로 분류하는 알람 유형 — 위험 구역 섹션과 같은 기준을 쓴다 */
+const ENV_ALARM_TYPES=['누수 감지','결로 위험','CO₂ 농도 초과','미세먼지 농도 초과','실내 온도 상한 초과'];
+
+/* ── 탭 1 : 운영 현황 ── */
+function dashOps(openAl,openSf){
+  return `
   <div class="g21 mb12">
-    <div class="card"><div class="ch"><span class="ct"><span class="ci">🧱</span>모듈 타입별 운영 상태</span>
-      <span class="cx">활성 이벤트 심각도 가중 합산</span></div>
-      <div class="cb"><div class="typeGrid">${MODULE_TYPES.map(t=>`
-        <button class="typeCard" onclick="state.mapType='${t.id}';goPage('map')">
-          <span class="dg" style="background:${t.c}"></span>
-          <div class="dn2">${t.nm}</div><div class="dm">개체 ${t.count}기 · ${t.grade}</div>
-          <div class="dstats"><div>알람<b>${t.al}</b></div><div>민원<b>${t.req}</b></div>
-            <div>작업<b>${t.wo}</b></div><div>전력<b>${fx(t.eng)}</b></div></div>
-        </button>`).join('')}</div>
-        ${tgrps.length?`<div class="sec" style="margin:14px 0 8px">동일 모듈 타입 반복 현상 <span class="srcb calc">산출</span></div>
-        ${tgrps.map(g=>`<div class="kv"><span class="k"><b style="color:var(--ink)">${typeNmOf(g.type)} ${g.units.size}기</b>
-          <small>에서 같은 현상 — ${g.kind}</small></span>
-          <span class="v"><span class="pill warn">반복 ${g.rep}회</span></span></div>`).join('')}`:''}
-        <div class="sec" style="margin:14px 0 8px">최근 7일 단지 전력 추이 <span class="srcb meas">계측</span></div>
-        ${svgBars(ENG_TREND.slice(-7).map(e=>+e.elec),640,64,(v,i)=>i===6?'#062b5c':'#38a3f5')}
-        <div class="axl"><span>08-02</span><span>08-04</span><span>08-06</span><span>08-08</span></div>
-      </div></div>
+    <div class="card"><div class="ch"><span class="ct"><span class="ci">🚨</span>긴급 조치 목록</span>
+      <button class="btn sm" onclick="goPage('alarm')">전체 →</button></div>
+      <table class="tbl"><thead><tr><th>알람</th><th>위치</th><th>설비</th><th>상태</th></tr></thead><tbody>
+      ${openAl.filter(a=>a.sev<=2).slice(0,7).map(a=>`<tr class="clk" onclick="goPage('alarm');openAlarm('${a.id}')">
+        <td class="str"><span class="sevDot sev${a.sev}"></span>${a.type}</td>
+        <td style="font-size:11px">${a.loc}</td>
+        <td style="font-size:11px;color:var(--muted)">${a.eq}</td>
+        <td><span class="pill ${a.st==='occurred'?'danger':a.st==='acting'?'info':'mute'}">${ASTATUS[a.st]}</span></td></tr>`).join('')}
+      </tbody></table></div>
     <div class="card"><div class="ch"><span class="ct"><span class="ci">🕐</span>24시간 이벤트</span>
       <span class="cx">${TIMELINE.length}건</span></div>
       <div class="cb" style="max-height:430px;overflow-y:auto">
-        <div class="tl">${TIMELINE.map(e=>`<div class="tlItem ${e.k}">
-          <div class="tt">${e.t}</div><div class="tm">${e.m}</div></div>`).join('')}</div>
+        ${/* 이벤트 유형별로 알람·민원·작업·CCTV 화면으로 이동한다 (go 필드) */''}
+        <div class="tl">${TIMELINE.map((e,i)=>{
+          const t=e.go?TL_TARGET[e.go.p]:null;
+          return `<div class="tlItem ${e.k}${e.go?' go':''}"
+            ${e.go?`role="button" tabindex="0" onclick="tlGo(${i})"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();tlGo(${i})}"
+              title="${t?t.nm+' 이동':''}"`:''}>
+            <div class="tt">${e.t}</div>
+            <div class="tm">${e.m}${e.go&&t?`<span class="tlGo">${t.i} ${t.c} ›</span>`:''}</div>
+          </div>`;}).join('')}</div>
       </div></div>
   </div>
-
-  <div class="g3">
-    <div class="card"><div class="ch"><span class="ct"><span class="ci">🚨</span>긴급 조치 목록</span>
-      <button class="btn sm" onclick="goPage('alarm')">전체 →</button></div>
-      <table class="tbl"><thead><tr><th>알람</th><th>위치</th><th>상태</th></tr></thead><tbody>
-      ${openAl.filter(a=>a.sev<=2).slice(0,5).map(a=>`<tr class="clk" onclick="goPage('alarm');openAlarm('${a.id}')">
-        <td class="str"><span class="sevDot sev${a.sev}"></span>${a.type}</td>
-        <td style="font-size:11px">${a.loc}</td>
-        <td><span class="pill ${a.st==='occurred'?'danger':a.st==='acting'?'info':'mute'}">${ASTATUS[a.st]}</span></td></tr>`).join('')}
-      </tbody></table></div>
+  <div class="g2">
+    <div class="card"><div class="ch"><span class="ct"><span class="ci">🗺</span>위험 구역</span>
+      <span class="cx">FR-ENG-04 · 누수 · 온도 · CO₂ · 결로</span></div>
+      <div class="cb">${ALARMS.filter(a=>ENV_ALARM_TYPES.includes(a.type)).slice(0,6).map(a=>`
+        <div class="kv clk" onclick="goPage('alarm');openAlarm('${a.id}')">
+          <span class="k"><span class="sevDot sev${a.sev}"></span><b style="color:var(--ink)">${a.type}</b>
+            <small>${a.loc}</small></span>
+          <span class="v"><span class="pill ${a.st==='done'?'ok':SEV[a.sev].c}">${ASTATUS[a.st]}</span></span></div>`).join('')}
+        <div class="empty" style="text-align:left;margin-top:11px;font-size:10.5px">
+          단일 센서 순간값 오탐을 줄이기 위해 <b>지속 시간 + 복수 조건</b>을 적용합니다.
+          단, <b>누수 감지는 예외적으로 즉시 알람</b>을 생성합니다.</div>
+      </div></div>
     <div class="card"><div class="ch"><span class="ct"><span class="ci">🛡</span>안전·보안</span>
       <button class="btn sm" onclick="goPage('safety')">전체 →</button></div>
       <table class="tbl"><thead><tr><th>이벤트</th><th>위치</th><th>상태</th></tr></thead><tbody>
-      ${openSf.slice(0,5).map(s=>`<tr class="clk" onclick="goPage('safety')">
+      ${openSf.slice(0,6).map(s=>`<tr class="clk" onclick="goPage('safety')">
         <td class="str"><span class="sevDot sev${s.sev}"></span>${s.type}</td>
         <td style="font-size:11px">${s.loc}</td>
         <td><span class="pill ${s.st==='open'?'danger':'info'}">${s.st==='open'?'미조치':'조치 중'}</span></td></tr>`).join('')}
       </tbody></table></div>
-    <div class="card"><div class="ch"><span class="ct"><span class="ci">🔌</span>데이터 연계</span>
-      <span class="cx">FR-ADM-06</span></div>
-      <table class="tbl"><thead><tr><th>IF</th><th>최종 수신</th><th>상태</th></tr></thead><tbody>
-      ${IFACES.map(f=>`<tr><td class="str">${f.id}<div style="font-size:10px;color:var(--muted2);font-weight:400">${f.nm}</div></td>
-        <td class="num" style="font-size:11px;color:var(--muted)">${f.last}</td>
-        <td><span class="pill ${f.st==='ok'?'ok':f.st==='warn'?'warn':'mute'} dot">${f.st==='ok'?'정상':f.st==='warn'?'주의':'미연계'}</span></td></tr>`).join('')}
-      </tbody></table></div>
   </div>`;
+}
+
+/* ── 탭 2 : 에너지·환경 (SCR-08 에서 이관) ── */
+function dashEnv(anom,avg){
+  return `
+  <div class="g21 mb12">
+    <div class="card"><div class="ch"><span class="ct"><span class="ci">📈</span>에너지원별 30일 추이</span>
+      <span class="cx">전력 · 난방 · 수도</span></div>
+      <div class="cb">${svgMulti([{v:ENG_TREND.map(e=>+e.elec),c:'#0877ed'},{v:ENG_TREND.map(e=>+e.heat*6),c:'#e08a12'},
+                    {v:ENG_TREND.map(e=>+e.water*18),c:'#0f9b9b'}],640,150)}
+        <div style="display:flex;gap:16px;justify-content:center;margin-top:9px;font-size:10.5px;color:var(--muted)">
+          <span><i style="display:inline-block;width:10px;height:2px;background:#0877ed;vertical-align:middle;margin-right:5px"></i>전력 kWh</span>
+          <span><i style="display:inline-block;width:10px;height:2px;background:#e08a12;vertical-align:middle;margin-right:5px"></i>난방 (×6)</span>
+          <span><i style="display:inline-block;width:10px;height:2px;background:#0f9b9b;vertical-align:middle;margin-right:5px"></i>수도 (×18)</span></div>
+        <div class="empty" style="text-align:left;margin-top:11px;font-size:10.5px">
+          검침 누락 구간은 <b>보간하지 않고 결측으로 표시</b>합니다. 수집 지연 시 관리자 알림이 생성됩니다(E-COMM-002).</div>
+      </div></div>
+    <div class="card"><div class="ch"><span class="ct"><span class="ci">⚠</span>이상치 개체</span><span class="cx">FR-ENG-02</span></div>
+      <div class="cb" style="max-height:330px;overflow-y:auto">
+        ${anom.map(u=>{const dev=((u.kwh-avg)/avg*100);
+          return `<div class="kv clk" onclick="state.mapType='${u.type}';goPage('map')">
+            <span class="k"><b style="color:var(--ink)">${u.id}</b>
+            <small>${u.typeNm} · 그룹 평균 ${fx(avg)}kWh 대비</small></span>
+            <span class="v"><span style="color:var(--danger)">+${fx(dev)}%</span>
+            <div style="font-size:10.5px;color:var(--muted);font-weight:500">${fx(u.kwh)} kWh</div></span></div>`;}).join('')}
+        <div style="font-size:10.5px;color:var(--muted2);margin-top:10px;line-height:1.6">
+          표본이 적은 그룹은 <b>판정 보류</b>, 공실·입주 전환 급변은 제외합니다.</div>
+      </div></div>
+  </div>
+  <div class="card"><div class="ch"><span class="ct"><span class="ci">🌡</span>생활 환경 데이터</span>
+    <span class="cx">FR-ENG-03 · 세대 평균 · IoT 항목별</span></div>
+    <table class="tbl"><thead><tr><th>항목</th><th class="n">현재</th><th>권장 범위</th><th>상태</th></tr></thead><tbody>
+      <tr><td class="str">실내 온도</td><td class="n">28.6 ℃</td><td>18 ~ 26 ℃</td><td><span class="pill warn">주의</span></td></tr>
+      <tr><td class="str">실내 습도</td><td class="n">52 %</td><td>40 ~ 60 %</td><td><span class="pill ok">양호</span></td></tr>
+      <tr><td class="str">CO₂</td><td class="n">784 ppm</td><td>≤ 800 ppm</td><td><span class="pill ok">양호</span></td></tr>
+      <tr><td class="str">PM2.5</td><td class="n">6.2 ㎍/㎥</td><td>≤ 35 ㎍/㎥</td><td><span class="pill ok">양호</span></td></tr>
+      <!-- TVOC 는 단위 미확정 (SED TEL 6) — 숫자를 쓰지 않고 등급만 표기한다 -->
+      <tr><td class="str">TVOC</td><td class="n">좋음</td><td>단위 확정 대기</td><td><span class="pill ok">양호</span></td></tr>
+      <tr><td class="str">누수 감지</td><td class="n">1 건</td><td>0 건</td><td><span class="pill danger">긴급</span></td></tr>
+    </tbody></table></div>`;
+}
+
+/* ── 탭 3 : 데이터 연계 ── */
+function dashLink(){
+  const st=k=>k==='ok'?{nm:'정상',c:'ok'}:k==='warn'?{nm:'주의',c:'warn'}:{nm:'장애',c:'mute'};
+  /* 카드로 요약할 핵심 인터페이스 3종 — IFACES 의 id 는 IF-IOT 처럼 대문자다 */
+  const core=['IF-BMS','IF-EMS','IF-IOT']
+    .map(id=>IFACES.find(f=>f.id.toUpperCase()===id)).filter(Boolean);
+  return `
+  <div class="g3 mb12">${core.map(f=>{const s2=st(f.st);
+    return `<div class="card"><div class="ch"><span class="ct"><span class="ci">🔌</span>${f.id}</span>
+      <span class="pill ${s2.c} dot">${s2.nm}</span></div>
+      <div class="cb">
+        <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px">${f.nm}</div>
+        <div class="kv"><span class="k">마지막 수신</span><span class="v num">${f.last}</span></div>
+        <div class="kv"><span class="k">연계 상태</span><span class="v"><span class="pill ${s2.c}">${s2.nm}</span></span></div>
+      </div></div>`;}).join('')}</div>
+  <div class="card"><div class="ch"><span class="ct"><span class="ci">🔗</span>IoT 연계 목록</span>
+    <span class="cx">FR-ADM-06 · ${IFACES.length}개</span></div>
+    <table class="tbl"><thead><tr><th>IF</th><th>연계 시스템</th><th class="n">최종 수신</th><th>상태</th></tr></thead><tbody>
+    ${IFACES.map(f=>{const s2=st(f.st);
+      return `<tr><td class="str">${f.id}</td>
+        <td style="font-size:11px;color:var(--muted)">${f.nm}</td>
+        <td class="num" style="font-size:11px;color:var(--muted)">${f.last}</td>
+        <td><span class="pill ${s2.c} dot">${s2.nm}</span></td></tr>`;}).join('')}
+    </tbody></table></div>`;
 }
 
 
@@ -652,69 +757,6 @@ export function submitWo(){
 }
 
 
-/* ══════════ SCR-08 에너지·환경 ══════════ */
-export function pgEnergy8(){
-  const anom=UNITS.filter(u=>u.occ&&u.kwh>125).slice(0,6);
-  const avg=UNITS.filter(u=>u.occ).reduce((a,u)=>a+u.kwh,0)/UNITS.filter(u=>u.occ).length;
-  return pgHead('energy8','계층 집계 · 이상치 탐지 · 생활 환경 데이터 · 위험 구역',
-    `<span class="seg"><button class="on">이번 달</button><button onclick="toast('기간 필터 — 데모에서는 이번 달만 제공')">지난 달</button></span>`)+`
-  <div class="kpiRow" style="grid-template-columns:repeat(4,1fr)">
-    <div class="kpi info"><div class="kl2">단지 전력 <span class="srcb meas">계측</span></div>
-      <div class="kv2 num">${won(ENG_TREND.reduce((a,e)=>a+ +e.elec,0))}<small>kWh</small></div>
-      <div class="ks">30일 누적 · 전월 대비 <b class="up">▲ 8.4%</b></div></div>
-    <div class="kpi"><div class="kl2">개체 평균</div><div class="kv2 num">${fx(avg)}<small>kWh</small></div><div class="ks">동일 모듈 타입 기준</div></div>
-    <div class="kpi warn"><div class="kl2">이상치 개체 <span class="srcb calc">±2σ</span></div>
-      <div class="kv2 num">${anom.length}<small>기</small></div><div class="ks">공실 제외 · 판정 보류 2</div></div>
-    <div class="kpi danger"><div class="kl2">환경 위험 알람</div>
-      <div class="kv2 num">${ALARMS.filter(a=>['누수 감지','결로 위험','CO₂ 농도 초과','미세먼지 농도 초과'].includes(a.type)&&a.st!=='done').length}<small>건</small></div>
-      <div class="ks">누수 1 · 공기질 1 · 결로 1</div></div>
-  </div>
-  <div class="g21 mb12">
-    <div class="card"><div class="ch"><span class="ct"><span class="ci">📈</span>에너지원별 30일 추이</span><span class="cx">전력 · 난방 · 수도</span></div>
-      <div class="cb">${svgMulti([{v:ENG_TREND.map(e=>+e.elec),c:'#0877ed'},{v:ENG_TREND.map(e=>+e.heat*6),c:'#e08a12'},
-                    {v:ENG_TREND.map(e=>+e.water*18),c:'#0f9b9b'}],640,150)}
-        <div style="display:flex;gap:16px;justify-content:center;margin-top:9px;font-size:10.5px;color:var(--muted)">
-          <span><i style="display:inline-block;width:10px;height:2px;background:#0877ed;vertical-align:middle;margin-right:5px"></i>전력 kWh</span>
-          <span><i style="display:inline-block;width:10px;height:2px;background:#e08a12;vertical-align:middle;margin-right:5px"></i>난방 (×6)</span>
-          <span><i style="display:inline-block;width:10px;height:2px;background:#0f9b9b;vertical-align:middle;margin-right:5px"></i>수도 (×18)</span></div>
-        <div class="empty" style="text-align:left;margin-top:11px;font-size:10.5px">
-          검침 누락 구간은 <b>보간하지 않고 결측으로 표시</b>합니다. 수집 지연 시 관리자 알림이 생성됩니다(E-COMM-002).</div>
-      </div></div>
-    <div class="card"><div class="ch"><span class="ct"><span class="ci">⚠</span>이상치 개체</span><span class="cx">FR-ENG-02</span></div>
-      <div class="cb" style="max-height:330px;overflow-y:auto">
-        ${anom.map(u=>{const dev=((u.kwh-avg)/avg*100);
-          return `<div class="kv"><span class="k"><b style="color:var(--ink)">${u.id}</b>
-            <small>${u.typeNm} · 그룹 평균 ${fx(avg)}kWh 대비</small></span>
-            <span class="v"><span style="color:var(--danger)">+${fx(dev)}%</span>
-            <div style="font-size:10.5px;color:var(--muted);font-weight:500">${fx(u.kwh)} kWh</div></span></div>`;}).join('')}
-        <div style="font-size:10.5px;color:var(--muted2);margin-top:10px;line-height:1.6">
-          표본이 적은 그룹은 <b>판정 보류</b>, 공실·입주 전환 급변은 제외합니다.</div>
-      </div></div>
-  </div>
-  <div class="g2">
-    <div class="card"><div class="ch"><span class="ct"><span class="ci">🌡</span>생활 환경 데이터</span><span class="cx">FR-ENG-03 · 세대 평균</span></div>
-      <table class="tbl"><thead><tr><th>항목</th><th class="n">현재</th><th>권장 범위</th><th>상태</th></tr></thead><tbody>
-        <tr><td class="str">실내 온도</td><td class="n">28.6 ℃</td><td>18 ~ 26 ℃</td><td><span class="pill warn">주의</span></td></tr>
-        <tr><td class="str">실내 습도</td><td class="n">52 %</td><td>40 ~ 60 %</td><td><span class="pill ok">양호</span></td></tr>
-        <tr><td class="str">CO₂</td><td class="n">784 ppm</td><td>≤ 800 ppm</td><td><span class="pill ok">양호</span></td></tr>
-        <tr><td class="str">PM2.5</td><td class="n">6.2 ㎍/㎥</td><td>≤ 35 ㎍/㎥</td><td><span class="pill ok">양호</span></td></tr>
-        <!-- TVOC 는 단위 미확정 (SED TEL 6) — 숫자를 쓰지 않고 등급만 표기한다 -->
-        <tr><td class="str">TVOC</td><td class="n">좋음</td><td>단위 확정 대기</td><td><span class="pill ok">양호</span></td></tr>
-        <tr><td class="str">누수 감지</td><td class="n">1 건</td><td>0 건</td><td><span class="pill danger">긴급</span></td></tr>
-      </tbody></table></div>
-    <div class="card"><div class="ch"><span class="ct"><span class="ci">🗺</span>위험 구역</span><span class="cx">FR-ENG-04</span></div>
-      <div class="cb">${ALARMS.filter(a=>['누수 감지','결로 위험','CO₂ 농도 초과','미세먼지 농도 초과','실내 온도 상한 초과'].includes(a.type)).slice(0,6).map(a=>`
-          <div class="kv"><span class="k"><span class="sevDot sev${a.sev}"></span><b style="color:var(--ink)">${a.type}</b>
-            <small>${a.loc}</small></span>
-            <span class="v"><span class="pill ${a.st==='done'?'ok':SEV[a.sev].c}">${ASTATUS[a.st]}</span></span></div>`).join('')}
-        <div class="empty" style="text-align:left;margin-top:11px;font-size:10.5px">
-          단일 센서 순간값 오탐을 줄이기 위해 <b>지속 시간 + 복수 조건</b>을 적용합니다.
-          단, <b>누수 감지는 예외적으로 즉시 알람</b>을 생성합니다.</div>
-      </div></div>
-  </div>`;
-}
-
-
 /* ══════════ SCR-09 리포트·분석 (+ 비용·작업시간) ══════════ */
 export function pgReport(){
   const totCost=COSTS.reduce((a,c)=>a+c.v,0);
@@ -875,6 +917,90 @@ export function recSet(id,st){
 
 
 /* ══════════ SCR-13 안전·보안 이벤트 (신설 · PRD 갭) ══════════ */
+/* ══════════ SCR-05 CCTV·모니터링 ══════════════════════════════════
+   더미 화면이다. 영상 스트리밍은 데모 범위 밖이며(IF-CCTV 미연동),
+   카메라 타일은 회색 플레이스홀더다. 관련 이벤트는 SCR-03 알람 카드와
+   같은 스타일로 재사용한다.                                            */
+/* ── SCR-01 이벤트 피드 → 상세 화면 라우팅 ─────────────────────────
+   유형별 대상 화면. 배지 문구는 PAGES 레지스트리에서 파생시킨다.        */
+const TL_TARGET={
+  alarm:{nm:'알람 관리',      c:'SCR-03', i:'🔔'},
+  req:  {nm:'민원 관리',      c:'SCR-04', i:'📋'},
+  cctv: {nm:'CCTV·모니터링',  c:'SCR-05', i:'📹'},
+  work: {nm:'정비 작업 관리', c:'SCR-06', i:'🔧'},
+};
+
+/* 항목 클릭 — 해당 화면으로 이동한 뒤 지정된 항목을 연다.
+   알람·민원은 상세 패널(openAlarm·openReqAdmin), 작업 지시는 SCR-06 표의
+   행 선택(state.woSel) 방식이라 경로가 다르다.
+   CCTV 는 대상 id 가 없어 목록 화면까지만 이동한다.                     */
+export function tlGo(i){
+  const e=TIMELINE[i]; if(!e||!e.go)return;
+  const {p,id}=e.go;
+  if(p==='work'&&id)state.woSel=id;         // 렌더 전에 선택해 두면 바로 펼쳐진다
+  goPage(p);
+  if(!id||p==='work')return;
+  /* 상세 패널은 화면 렌더 후에 열어야 슬롯이 존재한다 */
+  requestAnimationFrame(()=>{
+    if(p==='alarm')openAlarm(id);
+    else if(p==='req')openReqAdmin(id);
+  });
+}
+
+export function pgCctv(){
+  /* 영상 연계가 의미 있는 이벤트만 — 안전·보안·설비 계열 */
+  const evs=ALARMS.filter(a=>['누수 감지','출입 이상','미세먼지 농도 초과','승강기 이상 진동',
+    '통신 장애','화재 감지기 통신 두절'].includes(a.type)||a.sev<=2).slice(0,6);
+  return pgHead('cctv','카메라 4분할 모니터링 · 이벤트 연계 영상 조회',
+    `<span class="pill mute">IF-CCTV 미연동</span>
+     <span class="pill info">${CCTVS.filter(c=>c.st==='rec').length} / ${CCTVS.length} 녹화 중</span>`)+`
+  <div class="g21">
+    <div>
+      <div class="card mb12">
+        <div class="ch"><span class="ct"><span class="ci">📹</span>카메라 그리드</span>
+          <span class="cx">4분할 · 클릭 시 상세</span></div>
+        <div class="cb"><div class="camGrid">${CCTVS.map(c=>`
+          <div class="cctv" onclick="openCctv('${c.id}')" style="cursor:pointer;aspect-ratio:16/9">
+            <span class="cl">${c.id}</span>
+            ${c.st==='rec'?'<span class="crec"><i></i>REC</span>'
+                          :'<span class="crec" style="color:#5a7a8c">OFF</span>'}
+            <span class="cph" style="font-size:34px">📹</span>
+            <span class="ct2">${c.nm}</span></div>`).join('')}</div>
+          <div class="empty" style="text-align:left;margin-top:11px;font-size:10.5px">
+            영상 스트리밍은 <b>데모 범위 밖</b>입니다. 실 연동 시 이벤트 발생 ±2분 구간만 조회되며,
+            조회 이력은 <b>감사 로그</b>에 자동 기록됩니다 (PRD NF-011·NF-012).</div>
+        </div></div>
+      <div class="card"><div class="cb" style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn blue" onclick="openWoNew({trg:'수동',nm:'CCTV 점검 조치',sp:'${COMMON.lobby}'})">
+          📋 작업지시 생성</button>
+        <button class="btn" onclick="goPage('work')">🔧 정비 작업 관리 (SCR-06)</button>
+        <button class="btn" onclick="goPage('alarm')">🔔 알람 관리 (SCR-03)</button>
+      </div></div>
+    </div>
+    <div>
+      <div class="card"><div class="ch"><span class="ct"><span class="ci">🔔</span>관련 이벤트</span>
+        <span class="cx">${evs.length}건 · SCR-03 연계</span></div>
+        ${/* SCR-13 안전 이벤트와 같은 safeCard 스타일을 재사용한다 */''}
+        <div class="cb">${evs.map(a=>`
+          <div class="safeCard ${a.sev===1?'r':a.sev===2?'w':a.sev===3?'i':'g'}">
+            <div class="safeHead"><span class="sh2">${a.type}</span>
+              <span style="display:flex;gap:6px;align-items:center">
+                <span class="pill ${SEV[a.sev].c} dot">${SEV[a.sev].nm}</span>
+                <span class="pill ${a.st==='done'?'ok':a.st==='acting'?'info':'danger'}">${ASTATUS[a.st]}</span></span></div>
+            <div class="safeBody">${a.src}</div>
+            <div class="safeMeta">
+              <span class="pill mute" style="font-family:monospace">${a.id}</span>
+              <span class="pill mute">${a.loc}</span><span class="pill mute">${a.eq}</span>
+              <span style="font-size:10.5px;color:var(--muted2)">발생 ${a.at} · 반복 ${a.rep}회</span></div>
+            <div style="font-size:11px;color:var(--ink2);margin-top:7px"><b>조치</b> ${a.act}</div>
+            <div style="display:flex;gap:6px;margin-top:9px">
+              <button class="btn sm" onclick="openCctv('${CCTVS[0].id}')">📹 영상 확인</button>
+              <button class="btn sm" onclick="openWoNew({trg:'알람',src:'${a.id}',nm:'${a.type} 조치',sp:'${a.loc}',eq:'${a.eq}'})">작업 지시</button>
+            </div></div>`).join('')}</div></div>
+    </div>
+  </div>`;
+}
+
 export function pgSafety(){
   const list=SAFETY.filter(s=>state.safeFilter==='all'||(state.safeFilter==='open'&&s.st!=='done')||(state.safeFilter==='done'&&s.st==='done'));
   const open=SAFETY.filter(s=>s.st!=='done');
@@ -1108,4 +1234,4 @@ export function renderPartnerList(){
 
 
 /* 인라인 핸들러가 참조하는 심볼을 window 에 등록 (동작 유지) */
-Object.assign(window,{pgDash,pgMap,typeGroupSvg,tgLayer,setType,openUnit,pgAlarm,resetAlarmFilter,openAlarm,alarmNext,openEscalation,escalationBody,pgReq,openReqAdmin,assignReq,reqNext,pgWork,pgPartnerPerf,setChk,woHold,woApprove,openWoNew,drawWoNew,submitWo,pgEnergy8,pgReport,pgRec,recSet,pgSafety,safeNext,openCctv,pgAudit,logAudit,myWos,renderPartner,i2,poSet,poSubmit,renderPartnerList});
+Object.assign(window,{setDashTab,setDashEng,tlGo,pgCctv,pgDash,pgMap,typeGroupSvg,tgLayer,setType,openUnit,pgAlarm,resetAlarmFilter,openAlarm,alarmNext,openEscalation,escalationBody,pgReq,openReqAdmin,assignReq,reqNext,pgWork,pgPartnerPerf,setChk,woHold,woApprove,openWoNew,drawWoNew,submitWo,pgReport,pgRec,recSet,pgSafety,safeNext,openCctv,pgAudit,logAudit,myWos,renderPartner,i2,poSet,poSubmit,renderPartnerList});

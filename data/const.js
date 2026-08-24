@@ -38,6 +38,8 @@ export const RCAT={
   '설비':['냉난방 불량','급수·배수','전기·조명','승강기','환기 설비'],
   '환경':['소음','냄새','결로·곰팡이','실내 공기질'],
   '시설':['공용부 파손','주차','조경·청소'],
+  /* HM-07 절감 시나리오의 「적용 요청」이 접수되는 경로 */
+  '에너지':['에너지 절감 요청'],
   '기타':['기타 문의'],
 };
 
@@ -84,10 +86,11 @@ export const PAGES={
   /* 관리자 */
   dash:    {nm:'통합 운영 대시보드', i:'⬡', c:'SCR-01', fr:'FR-MON-01', tier:'T1'},
   map:     {nm:'디지털 트윈 맵',     i:'🗺', c:'SCR-02', fr:'FR-DTM-01', tier:'T2'},
+  cctv:    {nm:'CCTV·모니터링',      i:'📹', c:'SCR-05', fr:'IF-CCTV',   tier:'T2'},
   alarm:   {nm:'알람 관리',          i:'🔔', c:'SCR-03', fr:'FR-MON-02', tier:'T1', bdg:()=>ALARMS.filter(a=>a.st!=='done').length},
   req:     {nm:'민원 관리',          i:'📋', c:'SCR-04', fr:'FR-CSM-03', tier:'T2', bdg:()=>REQUESTS.filter(r=>r.st!=='done').length, bw:1},
   work:    {nm:'정비 작업 관리',     i:'🔧', c:'SCR-06', fr:'FR-MNT-02', tier:'T1'},
-  energy8: {nm:'에너지·환경',        i:'⚡', c:'SCR-08', fr:'FR-ENG-01', tier:'T2'},
+  /* SCR-08 에너지·환경은 SCR-01 대시보드 「에너지·환경」 탭으로 통합됐다 */
   report:  {nm:'리포트·분석',        i:'📊', c:'SCR-09', fr:'FR-RPT-01', tier:'T2'},
   rec:     {nm:'예측·권고 관리',     i:'✦', c:'SCR-10', fr:'FR-SIM-08', tier:'T1', bdg:()=>RECS.filter(r=>r.st==='pending').length, bw:1},
   safety:  {nm:'안전·보안 이벤트',   i:'🛡', c:'SCR-13', fr:'신설',      tier:'T3', bdg:()=>SAFETY.filter(s=>s.st!=='done').length},
@@ -114,20 +117,22 @@ export const NAVG={
   resident:[
     {g:'우리 집',      items:['home']},
     {g:'생활 환경',    items:['envpred','neighbor']},
-    {g:'에너지',       items:['energy','scenario','simulator']},
+    {g:'에너지',       items:['energy','scenario']},
+    {g:'시뮬레이터',   items:['simulator']},
     {g:'서비스',       items:['request','reqstat']},
     {g:'확장 계획',    items:['roadmap']},
   ],
   facility:[
-    {g:'운영 현황',    items:['dash','map']},
+    {g:'운영 현황',    items:['dash','map','cctv']},
     {g:'이벤트 처리',  items:['alarm','req','work']},
-    {g:'환경',         items:['energy8']},
     {g:'확장 계획',    items:['roadmap']},
   ],
   admin:[
-    {g:'운영 현황',    items:['dash','map']},
+    /* SCR-05 는 SCR-01 이벤트 피드의 보안 이벤트가 향하는 화면이다.
+       관리자도 SCR-01 을 쓰므로 메뉴에 없으면 사이드바 활성 항목이 사라진다. */
+    {g:'운영 현황',    items:['dash','map','cctv']},
     {g:'이벤트 처리',  items:['alarm','req','work']},
-    {g:'분석 · 예측',  items:['energy8','report','rec']},
+    {g:'분석 · 예측',  items:['report','rec']},
     {g:'확장 계획',    items:['roadmap']},
   ],
 };

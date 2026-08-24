@@ -317,18 +317,39 @@ export const IFACES=[
 ];
 
 /* 24시간 이벤트 타임라인 */
+/* go — SCR-01 이벤트 피드에서 클릭 시 이동할 대상.
+     {p:'alarm'|'req'|'work', id}  해당 항목 상세를 연다
+     {p:'cctv'}                    보안 이벤트는 CCTV·모니터링 화면으로 (영상 연계)
+   id 는 ALARMS / REQUESTS / WORKORDERS 에 실제로 있는 값만 쓴다.        */
 export const TIMELINE=[
- {t:'16:55',k:'r',m:`<b>${UNIT_REF.b03}</b> 급수 누수 민원 접수 — 긴급 SLA 4시간`},
- {t:'16:52',k:'r',m:`<b>${COMMON.mech}</b> 누수 감지 알람 (AL-2608-041)`},
- {t:'16:30',k:'w',m:`<b>${MODULE.id}</b> CO₂ 903ppm 기준 초과 — 반복 3회`},
- {t:'15:12',k:'w',m:`<b>${COMMON.util}</b> EHP-2-03 비정상 운전 · 작업 WO-2608-017 진행`},
- {t:'14:48',k:'w',m:`<b>${UNIT_REF.c04}</b> IoT 게이트웨이 통신 장애`},
- {t:'14:20',k:'i',m:`<b>${COMMON.westLine}</b> 실내온도 초과 반복 알람 그룹 G-02 생성`},
- {t:'13:40',k:'g',m:`<b>${UNIT_REF.a04}</b> CO₂ 초과 알람 조치 완료`},
- {t:'11:22',k:'w',m:`<b>${COMMON.ev}</b> 승강기 진동 이상 · 협력사 점검 요청`},
- {t:'10:24',k:'i',m:`<b>${MODULE.id}</b> 냉난방 민원 접수 · 자동 분류 92%`},
- {t:'09:15',k:'i',m:`<b>${UNIT_REF.c02}</b> 에너지 사용 이상치 탐지 (+2.4σ)`},
- {t:'08:00',k:'i',m:`<b>${COMMON.vent}</b> AHU-1-01 필터 교체 주기 도래`},
+ {t:'16:55',k:'r',m:`<b>${UNIT_REF.b03}</b> 급수 누수 민원 접수 — 긴급 SLA 4시간`,
+  go:{p:'req',id:'REQ-26080711'}},
+ {t:'16:52',k:'r',m:`<b>${COMMON.mech}</b> 누수 감지 알람 (AL-2608-041)`,
+  go:{p:'alarm',id:'AL-2608-041'}},
+ {t:'16:30',k:'w',m:`<b>${MODULE.id}</b> CO₂ 903ppm 기준 초과 — 반복 3회`,
+  go:{p:'alarm',id:'AL-2608-040'}},
+ {t:'15:12',k:'w',m:`<b>${COMMON.util}</b> EHP-2-03 비정상 운전 · 작업 WO-2608-017 진행`,
+  go:{p:'work',id:'WO-2608-017'}},
+ {t:'14:48',k:'w',m:`<b>${UNIT_REF.c04}</b> IoT 게이트웨이 통신 장애`,
+  go:{p:'alarm',id:'AL-2608-038'}},
+ {t:'14:20',k:'i',m:`<b>${COMMON.westLine}</b> 실내온도 초과 반복 알람 그룹 G-02 생성`,
+  go:{p:'alarm',id:'AL-2608-037'}},
+ {t:'13:40',k:'g',m:`<b>${UNIT_REF.a04}</b> CO₂ 초과 알람 조치 완료`,
+  go:{p:'alarm',id:'AL-2608-035'}},
+ {t:'11:22',k:'w',m:`<b>${COMMON.ev}</b> 승강기 진동 이상 · 협력사 점검 요청`,
+  go:{p:'work',id:'WO-2608-014'}},
+ {t:'10:24',k:'i',m:`<b>${MODULE.id}</b> 냉난방 민원 접수 · 자동 분류 92%`,
+  go:{p:'req',id:'REQ-26080712'}},
+ {t:'09:15',k:'i',m:`<b>${UNIT_REF.c02}</b> 에너지 사용 이상치 탐지 (+2.4σ)`,
+  go:{p:'alarm',id:'AL-2608-033'}},
+ {t:'08:00',k:'i',m:`<b>${COMMON.vent}</b> AHU-1-01 필터 교체 주기 도래`,
+  go:{p:'alarm',id:'AL-2608-032'}},
+ /* 보안 이벤트 — SAFETY(SF-2608-014 · SF-2608-013)에서 같은 시각·내용으로 이관.
+    영상 연계 대상이므로 SCR-05 CCTV·모니터링 으로 보낸다. */
+ {t:'02:14',k:'r',m:`<b>${COMMON.park1}</b> 비인가 출입 시도 3회 — CAM-B1-02 영상 확인 필요`,
+  go:{p:'cctv'}},
+ {t:'01:38',k:'r',m:`<b>${COMMON.corr}</b> 화재 감지기 통신 두절 40분 — CAM-2F4-01 영상 확인 필요`,
+  go:{p:'cctv'}},
 ];
 
 /* 알림 센터 */

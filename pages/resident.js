@@ -5,7 +5,7 @@ import {MEASURES,MODULE,PLUG_MODES,SPACES} from '../data/moduleUnit.js';
 import {ENERGY,ENVPRED,HOMEHIST,NEIGHBOR,NOTI,REMODEL,REQUESTS,RISKS,SAFETY,SCENARIOS,TRANSFER_ITEMS} from '../data/ops.js';
 import {state} from '../data/state.js';
 import {gaugeArc,svgArea,svgBars,svgMulti} from '../render/chart.js';
-import {closeAll,dlgOpen,pgHead,renderPage,renderSideNav,toast} from '../render/shell.js';
+import {closeAll,dlgOpen,goPage,pgHead,renderPage,renderSideNav,toast} from '../render/shell.js';
 import {openDetail,popDetail,clearDetail,rightMode,rightTo} from '../render/detail.js';
 import {render3D,toggle3DLayer,toggle3DCut,spin3D,zoom3D,reset3D,selectCfdCase} from '../render/scene3d.js';
 /* 3D 뷰의 인라인 핸들러도 window 에 등록한다 (2D 와 같은 방식) */
@@ -767,9 +767,19 @@ export function pgScenario(){
   </div>`;
 }
 
+/* HM-07 → HM-04 : 절감 시나리오 적용 요청을 민원 초안으로 넘긴다.
+   직접 접수하지 않고 폼을 채워 보내므로, 입주민이 내용을 확인·수정한 뒤
+   「접수하기」를 누른다. 접수 후에는 HM-05 처리 현황에서 추적된다.      */
 export function applyScenario(id){
-  const s=SCENARIOS.find(x=>x.id===id);
-  toast(`「${s.nm}」 적용을 요청했습니다 — 관리자 검토 후 회신됩니다`);
+  const s=SCENARIOS.find(x=>x.id===id); if(!s)return;
+  state.reqDraft={
+    cat:'에너지', sub:'에너지 절감 요청', urg:'낮음',
+    desc:`절감 시나리오 「${s.nm}」 적용을 요청합니다`,
+    photos:0, loc:state.reqDraft.loc,       // 위치는 기존 선택 공간을 유지
+    src:s.id,                               // 출처 시나리오 (접수 이력에 남긴다)
+  };
+  goPage('request');
+  toast(`「${s.nm}」 적용 요청서를 작성했습니다 — 내용 확인 후 접수하세요`);
 }
 
 /* ══════════ HM-08 설비 수명 예측 (modular F-16 · FR-SIM-04) ══════════ */
@@ -1008,8 +1018,11 @@ export function submitReq(){
   REQUESTS.unshift({id,sp:MODULE.id,mine:true,cat:state.reqDraft.cat,sub:state.reqDraft.sub,
     urg:state.reqDraft.urg,at:'08-08 17:45',desc:`[${state.reqDraft.loc}] `+state.reqDraft.desc,st:'received',assignee:null,
     slaDue:sla,slaPct:2,visit:null,auto:{cat:`${state.reqDraft.cat} > ${state.reqDraft.sub}`,conf:0.86},rep:1,sat:null,photos:state.reqDraft.photos,
+    src:state.reqDraft.src||null,
     log:[{t:'08-08 17:45',m:'입주민 접수 · 접수번호 발급'},
          {t:'08-08 17:45',m:`자동 분류 「${state.reqDraft.cat} > ${state.reqDraft.sub}」 (신뢰도 86%)`},
+         /* HM-07 에서 넘어온 건은 출처 시나리오를 이력에 남긴다 */
+         ...(state.reqDraft.src?[{t:'08-08 17:45',m:`절감 시나리오 ${state.reqDraft.src} 적용 요청 연계 (HM-07)`}]:[]),
          {t:'08-08 17:45',m:'세대 센서 데이터 · 과거 이력 연결 완료'}]});
   const d={...state.reqDraft};
   state.reqDraft={cat:'설비',sub:null,urg:'보통',desc:'',photos:0,loc:SPACES[0].nm};

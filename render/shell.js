@@ -7,7 +7,7 @@ import {MODULE} from '../data/moduleUnit.js';
 import {ALARMS,COSTS,ENERGY,NEIGHBOR,NOTI,RECS,REQUESTS,SAFETY,WORKORDERS} from '../data/ops.js';
 import {state} from '../data/state.js';
 import {clearDetail,detailDepth,popDetail} from './detail.js';
-import {myWos,pgAlarm,pgAudit,pgDash,pgEnergy8,pgMap,pgRec,pgReport,pgReq,pgSafety,pgWork,renderPartner} from '../pages/admin.js';
+import {myWos,pgAlarm,pgCctv,pgAudit,pgDash,pgMap,pgRec,pgReport,pgReq,pgSafety,pgWork,renderPartner} from '../pages/admin.js';
 import {pgSimulator} from '../pages/simulator.js';
 import {pgEnergyRes,pgEnvpred,pgHistory,pgHome,pgLifespan,pgMaterial,pgNeighbor,pgPipe,pgRemodel,pgReqstat,pgRequest,pgRoadmap,pgScenario,pgTransfer,renderPipe,renderPlan,renderReqForm,renderReqPlan,renderRight,selectRoom} from '../pages/resident.js';
 
@@ -152,8 +152,8 @@ export const PAGEFN={
   home:pgHome, material:pgMaterial, pipe:pgPipe, envpred:pgEnvpred, neighbor:pgNeighbor,
   energy:pgEnergyRes, scenario:pgScenario, simulator:pgSimulator, request:pgRequest, reqstat:pgReqstat,
   lifespan:pgLifespan, history:pgHistory, remodel:pgRemodel, transfer:pgTransfer,
-  dash:pgDash, map:pgMap, alarm:pgAlarm, req:pgReq, work:pgWork,
-  energy8:pgEnergy8, report:pgReport, rec:pgRec, safety:pgSafety, audit:pgAudit,
+  dash:pgDash, map:pgMap, cctv:pgCctv, alarm:pgAlarm, req:pgReq, work:pgWork,
+  report:pgReport, rec:pgRec, safety:pgSafety, audit:pgAudit,
 };
 
 
